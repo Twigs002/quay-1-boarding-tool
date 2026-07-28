@@ -1,6 +1,6 @@
-# Never commit live config (holds the Apps Script endpoint URL + Supabase keys).
-# Only web/config.example.js is committed, with placeholders.
-web/config.js
+# web/config.js IS committed (like quay-hubspot/config.js): the Supabase anon key
+# is public by design (Postgres RLS), and the Apps Script endpoint is public in the
+# same way quay-hubspot exposes its endpoint. No private secret lives in it.
 
 # Node / tooling
 node_modules/
