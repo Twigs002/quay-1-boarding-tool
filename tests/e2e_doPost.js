@@ -72,6 +72,35 @@ check(/forbidden/.test(post({ kind: 'retry', accessToken: 'jwt', queue_id: 'Q1' 
 check(/unknown action/.test(post({ kind: 'bogus', accessToken: 'jwt' }).error || ''),
   'unknown kind -> unknown action error');
 
+console.log('6. broker role: onboarding provisions (no admin gate INSIDE provisionAll_), offboard + standalone provision stay admin-only');
+// A separate gas instance whose caller is a pure broker (not super/admin).
+const BROKER = { id: 'u2', email: 'broker@quay1.co.za', name: 'Bree Broker', is_admin: false, is_super: false, is_broker: true, active: true };
+const brokerGas = loadGas({ props: DEFAULT_PROPS, dryRun: true, authUser: BROKER });
+brokerGas.getSheet('Provisioning Queue'); brokerGas.getSheet('Offboarding Queue'); brokerGas.getSheet('Onboarding');
+const bpost = (body) => JSON.parse(brokerGas.ctx.doPost({ postData: { contents: JSON.stringify(body) } }).getContent());
+// (a) Onboard clears the ENTRY role gate for a broker (config error, not a role error).
+const rbOn = bpost(canonOnboardQuay1);
+check(rbOn.error !== 'unauthorized' && !/forbidden/.test(rbOn.error || ''),
+  `broker onboard_quay1 clears the entry role gate${rbOn.ok ? '' : ` -> got "${rbOn.error}"`}`);
+// (b) THE REGRESSION THIS FIX GUARDS: the inline provisioning step must NOT re-enforce admin.
+//     Call provisionAll_ directly with a broker ctx - it is the exact line that used to throw
+//     'forbidden' AFTER the contract was generated and the candidate emailed.
+let provErr = null, provRes = null;
+try { provRes = brokerGas.ctx.provisionAll_('F-broker', ['property24'], { role: { is_broker: true, is_admin: false, is_super: false } }); }
+catch (e) { provErr = String(e); }
+check(provErr === null && provRes && provRes.ok === true,
+  `provisionAll_ runs for a broker (inline onboard path, no admin gate)${provErr ? ' -> threw ' + provErr : ''}`);
+// (c) The STANDALONE 'provision' kind stays admin-only: a broker is forbidden up front.
+check(/forbidden/.test(bpost({ kind: 'provision', accessToken: 'jwt', folderId: 'F-broker' }).error || ''),
+  'standalone provision kind -> forbidden for a broker (admin-only)');
+// (d) An admin passes the standalone provision gate (fails later on the missing row, not forbidden).
+check(!/forbidden/.test(post({ kind: 'provision', accessToken: 'jwt', folderId: 'F-broker' }).error || ''),
+  'standalone provision kind -> admin passes the gate');
+// (e) Offboarding stays super/admin: a broker is forbidden.
+const rbOff = bpost({ kind: 'offboard', accessToken: 'jwt', full_name: 'Jane Doe', quay_email: 'jane@quay1.co.za', requested_by: 'broker@quay1.co.za', requested_by_name: 'Bree Broker' });
+check(/forbidden/.test(rbOff.error || ''),
+  `broker offboard -> forbidden (offboarding stays super/admin)${rbOff.ok ? ' -> WRONGLY ALLOWED' : ''}`);
+
 console.log();
 if (FAIL.length) {
   console.log(`RESULT: SEAM NOT YET CONFORMED (${FAIL.length} check(s) fail CONTRACTS section 8)`);

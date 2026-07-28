@@ -11,8 +11,8 @@
  * admin kinds resolve the auth context first (each handler asserts its own role):
  *   fica_upload / candidate_upload -> Fica.ficaUpload_(body)          [token-less]
  *   book_induction                 -> Induction.bookInduction_(body)  [token-less]
- *   onboard_quay1                  -> Onboarding_Quay1.onboardQuay1_(body, ctx)   [admin]
- *   onboard_aqua                   -> Onboarding_Aqua.onboardAqua_(body, ctx)     [admin]
+ *   onboard_quay1                  -> Onboarding_Quay1.onboardQuay1_(body, ctx)   [onboarder: super/admin/broker]
+ *   onboard_aqua                   -> Onboarding_Aqua.onboardAqua_(body, ctx)     [onboarder: super/admin/broker]
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
  *   offboard                       -> Offboarding.offboardRequest_(body, ctx)     [admin]
  *   status                         -> Queue.readForUi_(ctx)           [authed, role-scoped]
@@ -86,6 +86,7 @@ function dispatch_(kind, body, ctx) {
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. */
 function _provisionDispatch_(body, ctx) {
+  requireAdmin_(ctx);  // standalone re-provision is admin-only (inline onboard provisioning is gated by requireOnboarder_)
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   var systems = _provisionList_(body, body);

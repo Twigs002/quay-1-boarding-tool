@@ -14,13 +14,13 @@
  * programs(JSON), systems (optional explicit list). requester_* FORCE-OVERRIDDEN from ctx.
  *
  * Public surface:
- *   onboardAqua_(body, ctx)      - {ok, folderId, folderUrl, pdfUrl}   full flow. requireAdmin_.
+ *   onboardAqua_(body, ctx)      - {ok, folderId, folderUrl, pdfUrl}   full flow. requireOnboarder_ (super/admin/broker).
  *   genAquaMoa_(folder, data)    - {docId, url, pdfUrl, pdfFile}  select template, fill, PDF.
  *   aquaTemplateFor_(agreementType) - String templateId  monthly|fixed|permanent (props).
  */
 
 function onboardAqua_(body, ctx) {
-  requireAdmin_(ctx);
+  requireOnboarder_(ctx);
   var f = (body && body.fields) || body || {};
   var name = String(f.name || f.full_name || '').trim();
   var id = String(f.id_number || '').trim();

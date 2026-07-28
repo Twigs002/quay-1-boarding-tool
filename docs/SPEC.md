@@ -58,8 +58,11 @@ the shared bus between the two halves.
 
 - Writes are **Supabase JWT only** (the browser holds the logged-in user's JWT).
   Backend verifies against Supabase `/auth/v1/user` then reads the `staff` row for role.
-- Roles: `is_super`, `is_admin`, `is_broker`. Onboard/offboard actions require
-  `is_super || is_admin`. Brokers see only their own requested candidates (requester_email).
+- Roles: `is_super`, `is_admin`, `is_broker`. Onboarding actions allow
+  `is_super || is_admin || is_broker` (a broker submits only for their own hire;
+  `requester_email` is force-set from the JWT server-side, matching quay-hubspot).
+  Offboarding and provisioning require `is_super || is_admin`; retry requires `is_super`.
+  Brokers see only their own requested candidates (requester_email) and have no Offboard tab.
 - POSTs use `Content-Type: text/plain` to dodge CORS preflight (existing pattern).
 - Supabase project: `dqszbqiimbfvmmnpgpsb` ("quay-clock", PRODUCTION). `staff` table has a
   `staff_admin_write_guard_tg` trigger - never auto-toggle is_super/is_admin.

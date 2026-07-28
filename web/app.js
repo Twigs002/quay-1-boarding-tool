@@ -107,6 +107,8 @@
   };
 
   function route(tab) {
+    // Brokers cannot open Offboard; bounce them to Onboard.
+    if (tab === 'offboard' && !(USER && USER.canOffboard)) tab = 'onboard';
     document.querySelectorAll('.tab-btn').forEach((b) => {
       const on = b.dataset.tab === tab;
       b.classList.toggle('active', on);
@@ -224,9 +226,13 @@
         </fieldset>
         <hr class="rule">`;
 
-      const canWrite = USER && USER.canWrite;
-      const gate = canWrite ? '' :
-        `<div class="notice warn">You are signed in as a broker, so you can view this form but only a super or admin can submit an onboarding request.</div>`;
+      const canOnboard = USER && USER.canOnboard;
+      const brokerOnly = USER && USER.isBroker && !USER.isSuper && !USER.isAdmin;
+      const gate = !canOnboard
+        ? `<div class="notice warn">You do not have permission to submit an onboarding request.</div>`
+        : brokerOnly
+          ? `<div class="notice">You are submitting as ${esc(USER.name || 'yourself')}. The request is logged under your name; a super or admin oversees account provisioning.</div>`
+          : '';
 
       form.innerHTML = `
         <div class="form-grid">${common}${entity === 'aqua' ? aqua : quay1}</div>
@@ -239,7 +245,7 @@
         <hr class="rule">
         ${gate}
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary" id="obSubmit" ${canWrite ? '' : 'disabled'}>Create contract &amp; provision</button>
+          <button type="submit" class="btn btn-primary" id="obSubmit" ${canOnboard ? '' : 'disabled'}>Create contract &amp; provision</button>
           <button type="reset" class="btn btn-ghost">Clear</button>
         </div>`;
 
@@ -480,6 +486,12 @@
     const so = $('#signOutBtn'); so.hidden = false;
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' - ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
+    // Offboarding is super/admin only; a broker never sees the tab (the backend
+    // also rejects a broker 'offboard' POST, so this is convenience, not the gate).
+    if (!(USER && USER.canOffboard)) {
+      const offBtn = document.querySelector('.tab-btn[data-tab="offboard"]');
+      if (offBtn) offBtn.remove();
+    }
     document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => route(b.dataset.tab)));
     route('onboard');
   }

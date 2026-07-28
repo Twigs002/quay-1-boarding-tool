@@ -15,14 +15,14 @@
 
   function viewOffboard(root) {
     const user = H.getUser();
-    const canWrite = user && user.canWrite;
+    const canOffboard = user && user.canOffboard;
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Offboard a person</h2>
         <p>Suspend the Google account, remove group and Drive access, release the HubSpot seat, and tear down the browser-portal logins. This fires automatically ${DELAY} minutes after you submit, with no cancel window.</p>
       </div>
       <div class="card card-pad stack">
-        ${canWrite ? '' : '<div class="notice warn">Only a super or admin can submit an offboarding request.</div>'}
+        ${canOffboard ? '' : '<div class="notice warn">Only a super or admin can submit an offboarding request.</div>'}
         <form id="offbForm" novalidate>
           <div class="form-grid">
             <div class="field">
@@ -39,7 +39,7 @@
           </div>
           <datalist id="peopleList"></datalist>
           <div class="form-actions">
-            <button type="submit" class="btn btn-danger" id="ofSubmit" ${canWrite ? '' : 'disabled'}>Review offboarding</button>
+            <button type="submit" class="btn btn-danger" id="ofSubmit" ${canOffboard ? '' : 'disabled'}>Review offboarding</button>
           </div>
         </form>
         <div id="offbConfirm"></div>

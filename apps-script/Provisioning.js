@@ -16,7 +16,7 @@
  *
  * Public surface:
  *   resolveSystems_(entity, programs, explicit) - [system...]  core systems + mapped programs.
- *   provisionAll_(folderId, systems, ctx)       - {ok, results:{system:status}}  requireAdmin_.
+ *   provisionAll_(folderId, systems, ctx)       - {ok, results:{system:status}}  auth enforced at call site (onboarder inline, admin standalone).
  *   googleCreate_(person)        - {email, tempPw, dryRun?}  Users.insert + Members.insert.
  *   googleSuspend_(email)        - {ok, ...}  Users.update {suspended:true} + group + Drive.
  *   propdataCreate_(person) / propdataDeactivate_(person) - {ok, dryRun?}  feeds-api REST.
@@ -78,8 +78,14 @@ function _personFor_(folderId) {
  * Orchestrate provisioning for one person: Google first (inline), then PropData (inline), then
  * enqueue the browser systems for the worker. Returns { ok, results:{system:status} }.
  */
+// NOTE: auth is enforced at the CALL SITE, not here. provisionAll_ runs from two paths:
+//   - inline from onboardQuay1_/onboardAqua_ (already gated by requireOnboarder_), so a
+//     broker's own onboard provisions as part of the flow;
+//   - the standalone 'provision' kind (_provisionDispatch_), which asserts requireAdmin_.
+// Do NOT re-add a role check inside here or broker onboarding throws AFTER the contract is
+// generated and the candidate emailed (leaving a half-done request). ctx is still passed
+// through for downstream audit/identity use.
 function provisionAll_(folderId, systems, ctx) {
-  requireAdmin_(ctx);
   var person = _personFor_(folderId);
   var results = {};
 

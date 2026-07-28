@@ -11,14 +11,17 @@
  * Rules:
  *   - Writes are Supabase JWT only, delivered in the POST body as `accessToken`. No shared
  *     secret fallback in this consolidated app (SPEC section 2: JWT only).
- *   - Roles: is_super, is_admin, is_broker. Onboard/offboard require is_super || is_admin.
- *     Brokers see only their own requested candidates (match on requester_email downstream).
+ *   - Roles: is_super, is_admin, is_broker. Onboarding allows is_super || is_admin || is_broker
+ *     (a broker requests only for themselves - requester_email is forced from ctx). Offboarding
+ *     and provisioning require is_super || is_admin. Brokers see only their own requested
+ *     candidates (match on requester_email downstream).
  *   - NEVER write is_super/is_admin from here (staff_admin_write_guard_tg guards that column).
  *   - Candidate kinds (fica_upload, book_induction) are token-less and never reach requireAdmin_.
  *
  * Public surface:
  *   verifyCaller_(accessToken)   - {email, name, isSuper, isAdmin, isBroker} | null.
  *   authContext_(body)           - {email, role:{is_super,is_admin,is_broker}, name} | throws.
+ *   requireOnboarder_(ctx)       - void | throws   assert is_super || is_admin || is_broker.
  *   requireAdmin_(ctx)           - void | throws   assert is_super || is_admin.
  *   requireSuper_(ctx)           - void | throws   assert is_super (retry / destructive UI).
  */
@@ -75,10 +78,22 @@ function authContext_(body) {
   };
 }
 
-/** Assert the caller may run admin actions (onboard / offboard / provision). */
+/** Assert the caller may run admin actions (offboard / provision / retry-adjacent). */
 function requireAdmin_(ctx) {
   if (!ctx || !ctx.role || !(ctx.role.is_super || ctx.role.is_admin)) {
     throw new Error('forbidden: admin role required');
+  }
+}
+
+/**
+ * Assert the caller may submit an ONBOARDING request: super, admin, or broker.
+ * A broker requests only for their own hire - requester_email/name are force-set from
+ * ctx in the onboard handlers, so a broker can never spoof another requester. Offboarding
+ * and provisioning stay admin-only (requireAdmin_); this relaxes onboarding only.
+ */
+function requireOnboarder_(ctx) {
+  if (!ctx || !ctx.role || !(ctx.role.is_super || ctx.role.is_admin || ctx.role.is_broker)) {
+    throw new Error('forbidden: onboarding role required');
   }
 }
 

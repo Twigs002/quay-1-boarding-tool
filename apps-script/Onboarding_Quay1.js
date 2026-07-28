@@ -20,14 +20,14 @@
  *   {{FULL_NAME}} {{ID_NUMBER}} {{START_DATE}} {{SENIOR_BROKER}} {{COMMISSION}} {{BROKER_ACTIVITY}}
  *
  * Public surface:
- *   onboardQuay1_(body, ctx)     - {ok, folderId, folderUrl, pdfUrl}   full flow. requireAdmin_.
+ *   onboardQuay1_(body, ctx)     - {ok, folderId, folderUrl, pdfUrl}   full flow. requireOnboarder_ (super/admin/broker).
  *   genQuay1Contract_(folder, data) - {docId, url, pdfUrl, pdfFile}  copy template, fill, PDF.
  *   quay1TemplateFor_(dealType, activity) - String templateId  Sale vs Rental. UI deal_type is
  *                                  the explicit override; else activity mentioning "rent".
  */
 
 function onboardQuay1_(body, ctx) {
-  requireAdmin_(ctx);
+  requireOnboarder_(ctx);
   var f = (body && body.fields) || body || {};
   var c = _quay1Fields_(f);
   if (!c.full_name || !c.id_number) return { ok: false, error: 'full_name and id_number are required' };

@@ -4,10 +4,11 @@
  * PIN login via a synthetic `<username>@quay1.local` email, so staff sign in
  * with the exact same credentials they use on the other Quay 1 systems.
  *
- * Access (per SPEC section 2):
+ * Access:
  *   - super / admin  -> full hub: Onboard, Provisioning status, Offboard.
- *   - broker         -> sees the hub but onboard/offboard SUBMIT is blocked
- *                       server-side; the UI shows their own requests read-only.
+ *   - broker         -> Onboard (submits their OWN hire requests, same as
+ *                       quay-hubspot) + Provisioning status scoped to their own
+ *                       requests. No Offboard tab; offboarding is super/admin only.
  * The is_super / is_admin / is_broker flags come straight off the staff row.
  *
  * NOTE: this is a client-side UI gate. The real enforcement is in the Apps
@@ -48,8 +49,13 @@ window.AUTH = (() => {
       isSuper, isAdmin, isBroker,
       // Coarse role marker app.js uses to choose what to show + enable.
       role: isSuper ? 'super' : isAdmin ? 'admin' : 'broker',
-      // Submit rights: onboard/offboard require super or admin (SPEC section 2).
-      canWrite: isSuper || isAdmin,
+      // Submit rights, split by action:
+      //  - Onboard: super, admin OR broker may submit. A broker requests only
+      //    for their own hire; requester_email is force-set from the JWT
+      //    server-side, matching quay-hubspot's broker-requests-contracts model.
+      //  - Offboard: super or admin only (a broker can never tear down access).
+      canOnboard: isSuper || isAdmin || isBroker,
+      canOffboard: isSuper || isAdmin,
     } };
   }
 
