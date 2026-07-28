@@ -360,3 +360,71 @@ body.pre-auth .main { display: none !important; }
 @media (max-width: 420px) {
   .tab-btn { padding: 10px 12px 12px; font-size: 12.5px; }
 }
+
+/* ============================================================
+   Design refresh (2026-07) - stronger hierarchy + grouped form
+   sections + richer inputs. Loaded last so it refines the base.
+   ============================================================ */
+
+/* Warmer page backdrop with a faint brand wash at the top. */
+body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px); }
+
+/* Topbar: subtle depth + gradient so the navy reads richer. */
+.topbar { background: linear-gradient(180deg, #43619F 0%, var(--blue-800) 100%); }
+.topbar-titles h1 { font-size: 17px; letter-spacing: .12em; }
+.topbar-titles p { letter-spacing: .04em; }
+
+/* Tabs: clearer active state with a soft chip on hover. */
+.tab-btn { border-radius: 8px 8px 0 0; }
+.tab-btn:hover { background: rgba(61,91,166,.06); }
+.tab-btn.active { font-weight: 700; border-bottom-width: 2.5px; }
+
+/* Page heading: bolder, with a yellow accent rule under it. */
+.section-head { margin-bottom: 18px; }
+.section-head h2 { font-size: 22px; letter-spacing: -.01em; }
+.section-head > h2::after {
+  content: ""; display: block; width: 44px; height: 3px; border-radius: 2px;
+  background: var(--yellow); margin-top: 10px;
+}
+
+/* Content cards: real elevation + a hairline accent top edge. */
+.card { box-shadow: var(--shadow); border-color: var(--line-2); }
+.card-pad { padding: 26px 28px; }
+
+/* Grouped form sections inside the onboard card. */
+.form-section + .form-section {
+  margin-top: 26px; padding-top: 26px; border-top: 1px solid var(--line-2);
+}
+.fs-title {
+  display: flex; align-items: center; gap: 9px; margin: 0 0 16px;
+  font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--accent-deep);
+}
+.fs-title::before {
+  content: ""; width: 4px; height: 15px; border-radius: 2px; background: var(--yellow); flex: none;
+}
+
+/* Inputs: a touch taller, softer resting state, confident focus. */
+.field label { font-size: 12px; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.field input, .field select, .field textarea {
+  background: var(--card-2); border-color: var(--line);
+  padding: 11px 13px; font-size: 14.5px; border-radius: 9px;
+  transition: border-color .12s, box-shadow .12s, background .12s;
+}
+.field input:hover:not(:disabled), .field select:hover:not(:disabled) { background: #fff; }
+.field input:focus, .field select:focus, .field textarea:focus {
+  background: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Provisioning tiles: a bit more presence + brand-tinted when on. */
+.check { border-radius: 10px; padding: 12px 14px; }
+.check.is-on { box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* Primary action: subtle lift so it clearly owns the form. */
+.btn { border-radius: 9px; }
+.btn-primary { box-shadow: 0 1px 2px rgba(30,46,89,.18); }
+.btn-primary:hover:not(:disabled) { box-shadow: 0 3px 10px rgba(30,46,89,.24); }
+.form-actions { margin-top: 22px; }
+
+/* Segmented entity control: sit it in a soft tray. */
+.seg { background: var(--paper-2); }

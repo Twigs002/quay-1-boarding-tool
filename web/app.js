@@ -223,8 +223,7 @@
             <label for="f_program_other_note">Other program - note</label>
             <input id="f_program_other_note" name="program_other_note" type="text" autocomplete="off">
           </div>
-        </fieldset>
-        <hr class="rule">`;
+        </fieldset>`;
 
       const canOnboard = USER && USER.canOnboard;
       const brokerOnly = USER && USER.isBroker && !USER.isSuper && !USER.isAdmin;
@@ -234,15 +233,24 @@
           ? `<div class="notice">You are submitting as ${esc(USER.name || 'yourself')}. The request is logged under your name; a super or admin oversees account provisioning.</div>`
           : '';
 
+      const roleTitle = entity === 'aqua' ? 'Agreement' : 'Role and contract';
       form.innerHTML = `
-        <div class="form-grid">${common}${entity === 'aqua' ? aqua : quay1}</div>
-        <hr class="rule">
-        ${programsBlock}
-        <fieldset>
-          <legend>Provision these systems</legend>
-          <div class="check-grid">${systems}</div>
-        </fieldset>
-        <hr class="rule">
+        <div class="form-section">
+          <h3 class="fs-title">Person</h3>
+          <div class="form-grid">${common}</div>
+        </div>
+        <div class="form-section">
+          <h3 class="fs-title">${roleTitle}</h3>
+          <div class="form-grid">${entity === 'aqua' ? aqua : quay1}</div>
+        </div>
+        <div class="form-section">
+          <h3 class="fs-title">Provisioning</h3>
+          ${programsBlock}
+          <fieldset${programsBlock ? ' style="margin-top:18px"' : ''}>
+            <legend>Provision these systems</legend>
+            <div class="check-grid">${systems}</div>
+          </fieldset>
+        </div>
         ${gate}
         <div class="form-actions">
           <button type="submit" class="btn btn-primary" id="obSubmit" ${canOnboard ? '' : 'disabled'}>Create contract &amp; provision</button>
