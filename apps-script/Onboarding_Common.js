@@ -1,0 +1,72 @@
+/**
+ * Onboarding_Common.js - helpers shared by BOTH onboarding flows (Quay1 + Aqua), so neither
+ * flow module reaches sideways into the other. Sits below the flow modules in the call order
+ * (Router -> Onboarding_* -> here -> Email/Drive/Util). Addition to the stub set, flagged to
+ * tester + architect.
+ *
+ * Public surface:
+ *   _entityFolder_(parentId, name, id)  - Folder  get-or-create "<name> - <id>" under a parent.
+ *   _emailContract_(entity, toEmail, name, folderId, pdfFile) - Boolean  send the branded
+ *                                         contract welcome email (auto-send: scoped pipeline
+ *                                         exception per SPEC section 6). Non-fatal: returns
+ *                                         false on send failure, the row + PDF still stand.
+ *   _provisionList_(body, fields)       - [system...]|null  the explicit systems the UI chose.
+ *                                         Accepts `provision` (UI key), `systems`, on either the
+ *                                         body or the fields object (TEST-REPORT drift 3).
+ */
+
+/** Explicit systems list from the payload, checking the UI `provision` key and `systems` on both
+ *  the top-level body and the nested fields object. Returns null when none is supplied (so the
+ *  caller falls back to the entity core set + program mapping). */
+function _provisionList_(body, fields) {
+  var b = body || {}, f = fields || {};
+  var v = b.provision || f.provision || b.systems || f.systems;
+  return (Array.isArray(v) && v.length) ? v : null;
+}
+
+/** Get-or-create the per-person folder "<name> - <id>" under `parentId`. */
+function _entityFolder_(parentId, name, id) {
+  var root = DriveApp.getFolderById(parentId);
+  var label = ((name || 'Unknown') + ' - ' + (id || '')).trim();
+  var it = root.getFoldersByName(label);
+  return it.hasNext() ? it.next() : root.createFolder(label);
+}
+
+/**
+ * Send the contract welcome email (with the FICA self-service link and the PDF attached).
+ * entity in {quay1, aqua}. Returns true when sent, false on a caught failure (non-fatal).
+ */
+function _emailContract_(entity, toEmail, name, folderId, pdfFile) {
+  if (!isEmail_(toEmail)) return false;
+  var company = CFG.COMPANY[entity] || CFG.COMPANY.quay1;
+  var first = firstName_(name);
+  var ficaUrl = ficaLink_(folderId);
+  var fullName = String(name || '').trim();
+  var subject = 'Your ' + company.name + ' Agreement' + (fullName ? ' - ' + fullName : '');
+  var plain =
+    'Hi ' + first + ',\n\n' +
+    'Welcome to ' + company.name + '. Please find your ' + company.kicker + ' attached.\n\n' +
+    'Kindly read it through, complete the signature page (sign where indicated and initial each ' +
+    'page), and return a signed copy to us. Keep a copy for your own records.\n\n' +
+    'FICA (required): please submit the following using your personal, secure link:\n' +
+    '  1. A certified copy of your ID or valid passport\n' +
+    '  2. Proof of your residential address, not older than 3 months\n' +
+    '  3. A bank confirmation letter or recent bank statement\n' +
+    '  4. Your income tax number (and SARS proof of it, if you have one)\n\n' +
+    'Submit your FICA documents here: ' + ficaUrl + '\n\n' +
+    'If anything is unclear, simply reply to this email and we will gladly help.\n\n' +
+    'Warm regards,\nThe ' + company.name + ' Team';
+  try {
+    var opts = {
+      cc: CFG.ALWAYS_CC.filter(function (x) { return x; }).join(','),
+      name: company.name,
+      htmlBody: agreementEmailHtml_(company, first, ficaUrl),
+    };
+    if (pdfFile) opts.attachments = [pdfFile.getAs('application/pdf')];
+    GmailApp.sendEmail(toEmail, subject, plain, opts);
+    return true;
+  } catch (err) {
+    logAudit_('email_contract_failed', { entity: entity, to: toEmail, error: String(err) });
+    return false;
+  }
+}

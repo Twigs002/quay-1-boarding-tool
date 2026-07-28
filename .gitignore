@@ -1,0 +1,42 @@
+# Never commit live config (holds the Apps Script endpoint URL + Supabase keys).
+# Only web/config.example.js is committed, with placeholders.
+web/config.js
+
+# Node / tooling
+node_modules/
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+*.log
+*.swp
+.idea/
+.vscode/
+
+# Python worker
+__pycache__/
+worker/__pycache__/
+worker/**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+worker/.venv/
+
+# Local secrets / creds
+*.env
+.env
+worker/.env
+worker/.env.*
+!worker/.env.example
+.clasp.json
+apps-script/.clasp.json
+.clasprc.json
+worker/service-account*.json
+worker/*-creds.json
+
+# Playwright
+worker/playwright-report/
+worker/test-results/
+worker/browser_profile/

@@ -1,0 +1,30 @@
+{
+  "_source": "docs/CONTRACTS.md - authoritative frozen wire (reconciled 2026-07-28). SPEC.md is higher-level design.",
+  "provisioning_queue_columns": [
+    "queue_id", "folderId", "full_name", "first_name", "id_number",
+    "quay_email", "cell", "system", "action", "payload_json",
+    "status", "result_json", "attempts", "updated_at"
+  ],
+  "offboarding_queue_columns": [
+    "offb_id", "full_name", "quay_email", "requested_by", "requested_at",
+    "fire_at", "systems_json", "status", "google_result",
+    "worker_result_json", "trigger_id"
+  ],
+
+  "provisioning_status": ["pending", "in_progress", "done", "error", "skipped"],
+  "provisioning_actions": ["create", "deactivate"],
+  "offboarding_status": ["scheduled", "firing", "done", "error"],
+
+  "_note_system_scopes": "col H of Provisioning Queue only ever holds the 5 in provisioning_systems (CONTRACTS section 1). hubspot lives ONLY in offboarding systems_json (col G) + the master vocab, handled inline by Apps Script - never a worker/queue-H value.",
+  "provisioning_systems": ["google", "propdata", "property24", "cma", "dialfire"],
+  "systems_master": ["google", "propdata", "property24", "cma", "dialfire", "hubspot"],
+  "offboarding_systems_default": ["google", "propdata", "property24", "cma", "dialfire", "hubspot"],
+  "inline_systems": ["google", "propdata"],
+  "worker_systems": ["property24", "cma", "dialfire"],
+  "entities": ["quay1", "aqua"],
+
+  "max_attempts_default": 3,
+  "fire_delay_ms": 1800000,
+  "queue_id_format": "PQ-<folderId>-<system>-<ts>",
+  "offb_id_format": "OFF-<ts>-<rand>"
+}

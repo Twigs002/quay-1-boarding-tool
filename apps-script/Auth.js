@@ -1,0 +1,90 @@
+/**
+ * Auth.js - identity and authorization. Verifies the caller's Supabase JWT and resolves the
+ * staff role. Every admin write path calls requireAdmin_ before mutating.
+ *
+ * Owner: backend. See docs/SPEC.md section 2, docs/RESEARCH.md section 2.3, docs/CONTRACTS.md.
+ *
+ * This is a faithful lift of the live Aqua _verifyCaller_ (aqua-contracts Code.js:202-234):
+ *   GET {SUPABASE_URL}/auth/v1/user with Authorization: Bearer <jwt> + apikey: <anon> -> id,
+ *   then GET /rest/v1/staff?auth_user_id=eq.<id>&select=* -> role row. Null if active===false.
+ *
+ * Rules:
+ *   - Writes are Supabase JWT only, delivered in the POST body as `accessToken`. No shared
+ *     secret fallback in this consolidated app (SPEC section 2: JWT only).
+ *   - Roles: is_super, is_admin, is_broker. Onboard/offboard require is_super || is_admin.
+ *     Brokers see only their own requested candidates (match on requester_email downstream).
+ *   - NEVER write is_super/is_admin from here (staff_admin_write_guard_tg guards that column).
+ *   - Candidate kinds (fica_upload, book_induction) are token-less and never reach requireAdmin_.
+ *
+ * Public surface:
+ *   verifyCaller_(accessToken)   - {email, name, isSuper, isAdmin, isBroker} | null.
+ *   authContext_(body)           - {email, role:{is_super,is_admin,is_broker}, name} | throws.
+ *   requireAdmin_(ctx)           - void | throws   assert is_super || is_admin.
+ *   requireSuper_(ctx)           - void | throws   assert is_super (retry / destructive UI).
+ */
+
+/**
+ * Verify a Supabase access token and resolve the staff role. Returns null on any failure
+ * (invalid token, no staff row, inactive) so callers treat it as unauthenticated.
+ */
+function verifyCaller_(accessToken) {
+  if (!accessToken) return null;
+  var supaUrl = prop_(PROP.SUPABASE_URL, true);
+  var anon = prop_(PROP.SUPABASE_ANON_KEY, true);
+  try {
+    var authRes = UrlFetchApp.fetch(supaUrl + '/auth/v1/user', {
+      method: 'get', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + accessToken, apikey: anon },
+    });
+    if (authRes.getResponseCode() !== 200) return null;
+    var uid = (safeJsonParse_(authRes.getContentText(), {}) || {}).id;
+    if (!uid) return null;
+
+    var staffRes = UrlFetchApp.fetch(
+      supaUrl + '/rest/v1/staff?auth_user_id=eq.' + encodeURIComponent(uid) + '&select=*',
+      { method: 'get', muteHttpExceptions: true,
+        headers: { Authorization: 'Bearer ' + accessToken, apikey: anon, Accept: 'application/json' } });
+    if (staffRes.getResponseCode() !== 200) return null;
+    var rows = safeJsonParse_(staffRes.getContentText(), []);
+    if (!rows || !rows.length) return null;
+    var s = rows[0];
+    if (s.active === false) return null;
+    return {
+      email: String(s.email || '').trim(),
+      name: String(s.name || '').trim(),
+      isSuper: !!s.is_super,
+      isAdmin: !!s.is_admin,
+      isBroker: !!s.is_broker,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Build the request auth context from the POST body's accessToken. Throws 'unauthorized' when
+ * the token is missing or does not resolve to an active staff row.
+ */
+function authContext_(body) {
+  var caller = verifyCaller_(body && body.accessToken);
+  if (!caller) throw new Error('unauthorized');
+  return {
+    email: caller.email,
+    name: caller.name,
+    role: { is_super: caller.isSuper, is_admin: caller.isAdmin, is_broker: caller.isBroker },
+  };
+}
+
+/** Assert the caller may run admin actions (onboard / offboard / provision). */
+function requireAdmin_(ctx) {
+  if (!ctx || !ctx.role || !(ctx.role.is_super || ctx.role.is_admin)) {
+    throw new Error('forbidden: admin role required');
+  }
+}
+
+/** Assert the caller is a super (retry an error row, other destructive UI). */
+function requireSuper_(ctx) {
+  if (!ctx || !ctx.role || !ctx.role.is_super) {
+    throw new Error('forbidden: super role required');
+  }
+}

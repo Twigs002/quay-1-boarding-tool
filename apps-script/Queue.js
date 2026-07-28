@@ -1,0 +1,280 @@
+/**
+ * Queue.js - the shared bus. All reads/writes of the Provisioning Queue and Offboarding Queue
+ * tabs go through here. This module OWNS the column layout and mirrors the exact field order
+ * from docs/CONTRACTS.md sections 1-3. Backend and worker must not drift from it.
+ *
+ * Owner: backend. Frozen schema: docs/CONTRACTS.md.
+ *
+ * Column maps (0-based index into the row array; letters per CONTRACTS):
+ *   PQ_COL  A..N   queue_id folderId full_name first_name id_number quay_email cell system
+ *                  action payload_json status result_json attempts updated_at
+ *   OQ_COL  A..K   offb_id full_name quay_email requested_by requested_at fire_at systems_json
+ *                  status google_result worker_result_json trigger_id
+ *
+ * Public surface:
+ *   PQ_COL / OQ_COL / PQ_HEADERS / OQ_HEADERS   - the frozen maps + header rows.
+ *   ensureQueueTabs_(sh)                        - create/repair both queue tab headers.
+ *   enqueueProvision_(pq)                       - String queue_id   append one PQ row.
+ *   enqueueDeactivate_(email, system, payload)  - String|null   guarded deactivate append.
+ *   readQueue_(tabName)                         - Array<Object>  rows as objects.
+ *   readForUi_(ctx)                             - Object   status snapshot (broker-scoped).
+ *   writeProvisionStatus_(queue_id, status, result) - void  set K/L/N by queue_id.
+ *   retryRow_(queue_id, ctx)                    - void   super-only: error -> pending.
+ *   writeOffboard_(oq)                          - String offb_id   append one OQ row.
+ *   setOffboardStatus_(offb_id, status, googleResult, workerResult) - void  set H/I/J.
+ *   setOffboardTrigger_(offb_id, triggerId)     - void   set K after the trigger is created.
+ *   readOffboard_()                             - Array<Object>  all OQ rows.
+ */
+
+var PQ_COL = {
+  queue_id: 0, folderId: 1, full_name: 2, first_name: 3, id_number: 4, quay_email: 5,
+  cell: 6, system: 7, action: 8, payload_json: 9, status: 10, result_json: 11,
+  attempts: 12, updated_at: 13,
+};
+var PQ_HEADERS = ['queue_id', 'folderId', 'full_name', 'first_name', 'id_number', 'quay_email',
+  'cell', 'system', 'action', 'payload_json', 'status', 'result_json', 'attempts', 'updated_at'];
+
+var OQ_COL = {
+  offb_id: 0, full_name: 1, quay_email: 2, requested_by: 3, requested_at: 4, fire_at: 5,
+  systems_json: 6, status: 7, google_result: 8, worker_result_json: 9, trigger_id: 10,
+};
+var OQ_HEADERS = ['offb_id', 'full_name', 'quay_email', 'requested_by', 'requested_at',
+  'fire_at', 'systems_json', 'status', 'google_result', 'worker_result_json', 'trigger_id'];
+
+/** Ensure both queue tabs exist with a header row. Called by setupHub. */
+function ensureQueueTabs_(sh) {
+  _ensureTab_(sh, CFG.TAB.PROVISION_QUEUE, PQ_HEADERS);
+  _ensureTab_(sh, CFG.TAB.OFFBOARD_QUEUE, OQ_HEADERS);
+}
+
+function _ensureTab_(sh, name, headers) {
+  var t = sh.getSheetByName(name) || sh.insertSheet(name);
+  t.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  t.setFrozenRows(1);
+  return t;
+}
+
+function _pqTab_() { return tab_(CFG.TAB.PROVISION_QUEUE); }
+function _oqTab_() { return tab_(CFG.TAB.OFFBOARD_QUEUE); }
+
+/** Write an array of cells as text so ids / leading zeros survive. */
+function _appendTextRow_(t, values) {
+  var row = t.getLastRow() + 1;
+  t.getRange(row, 1, 1, values.length).setNumberFormat('@')
+    .setValues([values.map(function (v) { return String(v == null ? '' : v); })]);
+  return row;
+}
+
+// ---------------------------------------------------------------- Provisioning Queue
+
+/**
+ * Append one Provisioning Queue row. `pq` fields: folderId, full_name, first_name, id_number,
+ * quay_email, cell, system, action, payload (object), status (caller decides: INLINE_SYSTEMS
+ * done/error, WORKER_SYSTEMS pending), result (object|optional). Returns the generated queue_id.
+ */
+function enqueueProvision_(pq) {
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    var t = _pqTab_();
+    var ts = Date.now().toString(36);
+    var queueId = 'PQ-' + (pq.folderId || 'x') + '-' + (pq.system || 'x') + '-' + ts;
+    var rowArr = [];
+    rowArr[PQ_COL.queue_id] = queueId;
+    rowArr[PQ_COL.folderId] = pq.folderId || '';
+    rowArr[PQ_COL.full_name] = pq.full_name || '';
+    rowArr[PQ_COL.first_name] = pq.first_name || '';
+    rowArr[PQ_COL.id_number] = pq.id_number || '';
+    rowArr[PQ_COL.quay_email] = pq.quay_email || '';
+    rowArr[PQ_COL.cell] = pq.cell || '';
+    rowArr[PQ_COL.system] = pq.system || '';
+    rowArr[PQ_COL.action] = pq.action || 'create';
+    rowArr[PQ_COL.payload_json] = JSON.stringify(pq.payload || {});
+    rowArr[PQ_COL.status] = pq.status || 'pending';
+    rowArr[PQ_COL.result_json] = JSON.stringify(pq.result || {});
+    rowArr[PQ_COL.attempts] = '0';
+    rowArr[PQ_COL.updated_at] = nowIso_();
+    _appendTextRow_(t, rowArr);
+    return queueId;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Append a `deactivate` row for a browser system, GUARDED: skip (return null) when an open
+ * (pending or in_progress) deactivate row already exists for the same (email, system). Used by
+ * offboarding so a re-fire does not double-enqueue.
+ */
+function enqueueDeactivate_(email, system, payload) {
+  // The dup-guard (check) and the append must be ONE critical section, else two overlapping
+  // offboarding fires could both pass the check and double-enqueue (TOCTOU). A script lock
+  // serialises them; enqueueProvision_'s own document lock still guards the raw append.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var rows = readQueue_(CFG.TAB.PROVISION_QUEUE);
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.system === system && r.action === 'deactivate' &&
+          String(r.quay_email) === String(email) &&
+          (r.status === 'pending' || r.status === 'in_progress')) {
+        return null; // already queued, idempotent
+      }
+    }
+    return enqueueProvision_({
+      quay_email: email, system: system, action: 'deactivate',
+      payload: payload || {}, status: 'pending',
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** All rows of a queue tab as objects keyed by that tab's column map. */
+function readQueue_(tabName) {
+  var isPq = (tabName === CFG.TAB.PROVISION_QUEUE);
+  var map = isPq ? PQ_COL : OQ_COL;
+  var t = tab_(tabName);
+  var last = t.getLastRow();
+  if (last < 2) return [];
+  var width = isPq ? PQ_HEADERS.length : OQ_HEADERS.length;
+  var vals = t.getRange(2, 1, last - 1, width).getValues();
+  return vals.map(function (r, i) {
+    var o = { _row: i + 2 };
+    Object.keys(map).forEach(function (k) { o[k] = String(r[map[k]] || ''); });
+    return o;
+  }).filter(function (o) { return o[isPq ? 'queue_id' : 'offb_id']; });
+}
+
+/**
+ * Status-screen snapshot: provisioning rows + offboarding rows. Brokers (not super/admin) are
+ * scoped to their own candidates by matching the Onboarding row's requester_email.
+ */
+function readForUi_(ctx) {
+  var pq = readQueue_(CFG.TAB.PROVISION_QUEUE);
+  var oq = readQueue_(CFG.TAB.OFFBOARD_QUEUE);
+  var isAdmin = ctx && ctx.role && (ctx.role.is_super || ctx.role.is_admin);
+  if (!isAdmin && ctx && ctx.email) {
+    var mine = {};
+    listOnboarding_(function (o) {
+      if (String(o.requester_email).toLowerCase() === String(ctx.email).toLowerCase()) {
+        mine[o.folderId] = true; return true;
+      }
+      return false;
+    });
+    pq = pq.filter(function (r) { return mine[r.folderId]; });
+    oq = []; // offboarding is admin-only visibility
+  }
+  // `rows` is the alias the status UI reads (TEST-REPORT drift 4); provisioning/offboarding are
+  // kept as explicit keys for any caller that wants them split.
+  return { ok: true, rows: pq, provisioning: pq, offboarding: oq };
+}
+
+/** Set K/L/N on the Provisioning Queue row matching queue_id. */
+function writeProvisionStatus_(queueId, status, result) {
+  var t = _pqTab_();
+  var last = t.getLastRow();
+  if (last < 2) return;
+  var ids = t.getRange(2, PQ_COL.queue_id + 1, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(queueId)) {
+      var row = i + 2;
+      t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue(status);
+      if (result !== undefined) {
+        t.getRange(row, PQ_COL.result_json + 1).setNumberFormat('@')
+          .setValue(JSON.stringify(result || {}));
+      }
+      t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
+      return;
+    }
+  }
+}
+
+/** Super-only: flip an `error` Provisioning row back to `pending` so the worker retries it. */
+function retryRow_(queueId, ctx) {
+  requireSuper_(ctx);
+  var t = _pqTab_();
+  var last = t.getLastRow();
+  if (last < 2) return { ok: false, error: 'not_found' };
+  var vals = t.getRange(2, 1, last - 1, PQ_HEADERS.length).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][PQ_COL.queue_id]) === String(queueId)) {
+      if (String(vals[i][PQ_COL.status]) !== 'error') {
+        return { ok: false, error: 'not_in_error_state' };
+      }
+      var row = i + 2;
+      t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'not_found' };
+}
+
+// ---------------------------------------------------------------- Offboarding Queue
+
+/**
+ * Append one Offboarding Queue row (status scheduled). `oq` fields: full_name, quay_email,
+ * requested_by, requested_at, fire_at, systems (array). Returns the generated offb_id.
+ */
+function writeOffboard_(oq) {
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    var t = _oqTab_();
+    var offbId = uid_('OFF');
+    var rowArr = [];
+    rowArr[OQ_COL.offb_id] = offbId;
+    rowArr[OQ_COL.full_name] = oq.full_name || '';
+    rowArr[OQ_COL.quay_email] = oq.quay_email || '';
+    rowArr[OQ_COL.requested_by] = oq.requested_by || '';
+    rowArr[OQ_COL.requested_at] = oq.requested_at || nowIso_();
+    rowArr[OQ_COL.fire_at] = oq.fire_at || '';
+    rowArr[OQ_COL.systems_json] = JSON.stringify(oq.systems || CFG.SYSTEMS);
+    rowArr[OQ_COL.status] = 'scheduled';
+    rowArr[OQ_COL.google_result] = '';
+    rowArr[OQ_COL.worker_result_json] = '';
+    rowArr[OQ_COL.trigger_id] = '';
+    _appendTextRow_(t, rowArr);
+    return offbId;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function _findOffbRow_(t, offbId) {
+  var last = t.getLastRow();
+  if (last < 2) return 0;
+  var ids = t.getRange(2, OQ_COL.offb_id + 1, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(offbId)) return i + 2;
+  }
+  return 0;
+}
+
+/** Set status (H) and optionally google_result (I) / worker_result_json (J) on an OQ row. */
+function setOffboardStatus_(offbId, status, googleResult, workerResult) {
+  var t = _oqTab_();
+  var row = _findOffbRow_(t, offbId);
+  if (!row) return;
+  if (status != null) t.getRange(row, OQ_COL.status + 1).setNumberFormat('@').setValue(status);
+  if (googleResult !== undefined) {
+    t.getRange(row, OQ_COL.google_result + 1).setNumberFormat('@')
+      .setValue(JSON.stringify(googleResult || {}));
+  }
+  if (workerResult !== undefined) {
+    t.getRange(row, OQ_COL.worker_result_json + 1).setNumberFormat('@')
+      .setValue(JSON.stringify(workerResult || {}));
+  }
+}
+
+/** Record the one-shot trigger id (K) for an OQ row. */
+function setOffboardTrigger_(offbId, triggerId) {
+  var t = _oqTab_();
+  var row = _findOffbRow_(t, offbId);
+  if (row) t.getRange(row, OQ_COL.trigger_id + 1).setNumberFormat('@').setValue(triggerId || '');
+}
+
+/** All Offboarding Queue rows as objects. */
+function readOffboard_() { return readQueue_(CFG.TAB.OFFBOARD_QUEUE); }
