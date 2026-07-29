@@ -6,9 +6,11 @@
  *
  * Public surface:
  *   _entityFolder_(parentId, name, id)  - Folder  get-or-create "<name> - <id>" under a parent.
- *   _emailContract_(entity, toEmail, name, folderId, pdfFile) - Boolean  send the branded
+ *   _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) - Boolean  send the branded
  *                                         contract welcome email (auto-send: scoped pipeline
- *                                         exception per SPEC section 6). Non-fatal: returns
+ *                                         exception per SPEC section 6). CC = CFG.CONTRACT_CC[entity]
+ *                                         plus any extraCc (Quay 1 passes senior + requester, to
+ *                                         match the live recruitment pipeline). Non-fatal: returns
  *                                         false on send failure, the row + PDF still stand.
  *   _provisionList_(body, fields)       - [system...]|null  the explicit systems the UI chose.
  *                                         Accepts `provision` (UI key), `systems`, on either the
@@ -36,11 +38,12 @@ function _entityFolder_(parentId, name, id) {
  * Send the contract welcome email (with the FICA self-service link and the PDF attached).
  * entity in {quay1, aqua}. Returns true when sent, false on a caught failure (non-fatal).
  */
-function _emailContract_(entity, toEmail, name, folderId, pdfFile) {
+function _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) {
   if (!isEmail_(toEmail)) return false;
   var company = CFG.COMPANY[entity] || CFG.COMPANY.quay1;
   var first = firstName_(name);
   var ficaUrl = ficaLink_(folderId);
+  var ccList = _contractCc_(entity, extraCc);
   var fullName = String(name || '').trim();
   var subject = 'Your ' + company.name + ' Agreement' + (fullName ? ' - ' + fullName : '');
   var plain =
@@ -58,10 +61,10 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile) {
     'Warm regards,\nThe ' + company.name + ' Team';
   try {
     var opts = {
-      cc: CFG.ALWAYS_CC.filter(function (x) { return x; }).join(','),
       name: company.name,
       htmlBody: agreementEmailHtml_(company, first, ficaUrl),
     };
+    if (ccList) opts.cc = ccList;
     if (pdfFile) opts.attachments = [pdfFile.getAs('application/pdf')];
     GmailApp.sendEmail(toEmail, subject, plain, opts);
     return true;
@@ -69,4 +72,21 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile) {
     logAudit_('email_contract_failed', { entity: entity, to: toEmail, error: String(err) });
     return false;
   }
+}
+
+/** Build the contract-email CC string for an entity: the fixed CONTRACT_CC[entity] set plus any
+ *  extraCc (Quay 1 adds the senior broker + requester). De-duplicated (case-insensitive), only
+ *  valid addresses, excluding the recipient is left to Gmail. Returns '' when nothing to CC. */
+function _contractCc_(entity, extraCc) {
+  var base = (CFG.CONTRACT_CC && CFG.CONTRACT_CC[entity]) || CFG.ALWAYS_CC || [];
+  var all = base.concat(Array.isArray(extraCc) ? extraCc : (extraCc ? [extraCc] : []));
+  var seen = {}, out = [];
+  all.forEach(function (e) {
+    var v = String(e || '').trim();
+    if (!isEmail_(v)) return;
+    var k = v.toLowerCase();
+    if (seen[k]) return;
+    seen[k] = true; out.push(v);
+  });
+  return out.join(',');
 }

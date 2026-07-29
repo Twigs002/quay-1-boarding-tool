@@ -93,7 +93,7 @@ function _provisionDispatch_(body, ctx) {
   if (!systems) {
     var o = readOnboardingByFolder_(folderId);
     if (!o) return { ok: false, error: 'onboarding row not found' };
-    systems = resolveSystems_(o.entity || 'quay1', o.programs, null);
+    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team);
   }
   return provisionAll_(folderId, systems, ctx);
 }

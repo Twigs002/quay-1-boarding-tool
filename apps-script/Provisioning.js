@@ -15,7 +15,7 @@
  * auto-links on Google login but we still enqueue an explicit create.
  *
  * Public surface:
- *   resolveSystems_(entity, programs, explicit) - [system...]  core systems + mapped programs.
+ *   resolveSystems_(entity, programs, explicit, team) - [system...]  core + mapped programs + team map.
  *   provisionAll_(folderId, systems, ctx)       - {ok, results:{system:status}}  auth enforced at call site (onboarder inline, admin standalone).
  *   googleCreate_(person)        - {email, tempPw, dryRun?}  Users.insert + Members.insert.
  *   googleSuspend_(email)        - {ok, ...}  Users.update {suspended:true} + group + Drive.
@@ -26,10 +26,14 @@
  * row with {"dry_run":true}. No live mutation until armed.
  */
 
-/** Resolve the systems to provision: an explicit list wins; else the entity core set plus any
- *  systems mapped from ticked programs. Filtered to the SYSTEMS enum; hubspot excluded here
- *  (seat create is a separate flag-gated concern). */
-function resolveSystems_(entity, programs, explicit) {
+/** Resolve the systems to provision. An explicit list (the form's ticked systems) is the base
+ *  selection; when none is given we fall back to the entity core set plus any systems mapped from
+ *  ticked programs. On TOP of either, the team's Team-Directory Systems are ALWAYS unioned in as a
+ *  baseline (Blocker B.3) - a team configured to always need a system gets it even when the
+ *  operator's explicit ticks omit it. Filtered to the SYSTEMS enum; hubspot excluded here (seat
+ *  create is a separate flag-gated concern). `team` is optional - behaviour is unchanged when the
+ *  team has no mapped systems (the default until the Systems column is filled). */
+function resolveSystems_(entity, programs, explicit, team) {
   var set = {};
   var add = function (s) {
     s = String(s || '').toLowerCase();
@@ -44,6 +48,8 @@ function resolveSystems_(entity, programs, explicit) {
       if (sys) add(sys);
     });
   }
+  // Team-configured systems are a baseline that applies in BOTH branches (see docstring).
+  if (team) teamMapping_(team).systems.forEach(add);
   return Object.keys(set);
 }
 
@@ -138,12 +144,10 @@ function _inlinePayload_(person, system, result) {
 
 // ---------------------------------------------------------------- Google Workspace
 
-/** Groups for a team from the GROUPS_JSON property (team -> [group emails]); [] if unset. */
+/** Groups for a team, from the Team Directory tab (teamMapping_), with the GROUPS_JSON property as
+ *  a fallback inside teamMapping_. [] when nothing is configured. See Teams.js (Blocker B.3). */
 function _groupsForTeam_(team) {
-  var map = safeJsonParse_(optProp_(PROP.GROUPS_JSON), {});
-  if (!map || typeof map !== 'object') return [];
-  var g = map[team] || map['*'] || [];
-  return Array.isArray(g) ? g : [];
+  return teamMapping_(team).groups;
 }
 
 /**

@@ -34,6 +34,7 @@ function setupHub() {
   }
   ensureOnboardingTab_(onb);
   ensureQueueTabs_(ss);
+  ensureTeamDirectoryTab_(ss); // B.3 team -> groups/division/systems map (seed via setupTeamDirectory)
   _seedFlagDefaults_();
   var msg = 'setupHub complete. Tracker: ' + ss.getId() + '. Tabs: ' +
     ss.getSheets().map(function (s) { return s.getName(); }).join(', ') + '.';
@@ -99,6 +100,7 @@ function bootstrapLive() {
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxc3picWlpbWJmdm1tbnBncHNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NDk4OTQsImV4cCI6MjA5NjQyNTg5NH0.M9RQnJEidyIMZAwbELTSPakiSnvuWBdHTjD7nuOdCZY');
   out.push('SUPABASE_URL + SUPABASE_ANON_KEY <- public values');
   out.push(setupHub());
+  out.push(setupTeamDirectory()); // seed Team Directory (Team+Division) from divisions.json
   out.push(setupTriggers());
   var msg = 'bootstrapLive done:\n  ' + out.join('\n  ');
   Logger.log(msg);

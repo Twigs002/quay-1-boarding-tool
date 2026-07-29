@@ -47,7 +47,7 @@ function onboardAqua_(body, ctx) {
 
   var emailed = _emailContract_('aqua', f.email, name, folder.getId(), gen.pdfFile);
 
-  var systems = resolveSystems_('aqua', f.programs, _provisionList_(body, f));
+  var systems = resolveSystems_('aqua', f.programs, _provisionList_(body, f), f.team);
   var prov = provisionAll_(folder.getId(), systems, ctx);
 
   return {

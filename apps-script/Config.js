@@ -85,7 +85,13 @@ var CFG = {
     ONBOARDING: 'Onboarding',
     PROVISION_QUEUE: 'Provisioning Queue',
     OFFBOARD_QUEUE: 'Offboarding Queue',
+    // team -> Google groups / division / systems map, editable in the tracker (B.3). Auto-seeded
+    // (Team + Division) from the shared divisions directory; the Groups/Systems cols are filled in
+    // by an admin. Read by teamMapping_ for Google provisioning + the divisions update.
+    TEAM_DIRECTORY: 'Team Directory',
   },
+  // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
+  DIVISIONS_URL: 'https://twigs002.github.io/quay-1-boarding-tool/data/divisions.json',
 
   // Enum vocabulary (mirror docs/CONTRACTS.md section 5). Import these exact strings.
   SYSTEMS: ['google', 'propdata', 'property24', 'cma', 'dialfire', 'hubspot'],
@@ -105,6 +111,26 @@ var CFG = {
   // Broker-facing program toggle -> lifecycle SYSTEM (RESEARCH 1.4). Only these two overlap the
   // SYSTEMS enum; whatsapp / training / other are informational and enqueue no provisioning row.
   PROGRAM_SYSTEM: { cma: 'cma', dialfire: 'dialfire' },
+
+  // Broker Activities - the residential clause definitions from the Quay 1 Broker Agreement
+  // template ("delete inapplicable definition" table; the chosen one is kept). Ported verbatim
+  // from the live recruitment frontend (quay-hubspot app.js BROKER_ACTIVITIES). `code` is the
+  // machine value the form sends; `def` is the exact clause text merged into {{BROKER_ACTIVITY}}.
+  // Commercial is parked (no commercial template yet), so it stays out of the picker.
+  BROKER_ACTIVITIES: [
+    { code: 'sell_res_sb', label: 'Sell · Residential · Broker (SB)', def: 'The selling and/or brokerage of immovable residential property or a broker performing his/her/their functions to such an end; and/or' },
+    { code: 'sell_res_jb', label: 'Sell · Residential · Assistant (JB)', def: 'The selling and/or brokerage of immovable residential property or an assistant to a broker performing his/her/their functions to such an end; and/or' },
+    { code: 'rent_res_sb', label: 'Rent · Residential · Broker (SB)', def: 'The renting and/or brokerage for rent of immovable residential property or a broker performing his/her/their functions to such an end; and/or' },
+    { code: 'rent_res_jb', label: 'Rent · Residential · Assistant (JB)', def: 'The renting and/or brokerage for rent of immovable residential property or an assistant to a broker performing his/her/their functions to such an end; and/or' },
+  ],
+
+  // Contract welcome-email CC, per entity. Quay 1 recruitment matches the LIVE pipeline exactly:
+  // kat + pagan + lieze (the fixed internal set), plus the senior broker + requester added at
+  // send time. Aqua keeps its own set (matches the live Aqua CONFIG). Threaded via _emailContract_.
+  CONTRACT_CC: {
+    quay1: ['kat@quay1.co.za', 'pagan@quay1.co.za', 'lieze@quay1.co.za'],
+    aqua: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'alan@quay1.co.za', 'lieze@quay1.co.za'],
+  },
 
   // Internal recipient lists (internal @quay1 addresses, not secrets; matches live Aqua CONFIG).
   ALWAYS_CC: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'alan@quay1.co.za', 'lieze@quay1.co.za'],

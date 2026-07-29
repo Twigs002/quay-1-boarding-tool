@@ -45,13 +45,15 @@ function onboardQuay1_(body, ctx) {
     email: c.candidate_email, contact: c.contact_number,
     start_date: fmtDate_(c.start_date), senior_name: c.senior_broker,
     senior_email: c.senior_email, requester_name: requesterName,
-    requester_email: requesterEmail, designation: c.activity, team: c.team,
+    requester_email: requesterEmail, designation: brokerActivityLabel_(c.activity) || c.activity, team: c.team,
     commission: c.commission, programs: c.programs, status: 'Contract sent',
   });
 
-  var emailed = _emailContract_('quay1', c.candidate_email, c.full_name, folder.getId(), gen.pdfFile);
+  // CC the senior broker + requester on the welcome email, matching the live recruitment pipeline.
+  var emailed = _emailContract_('quay1', c.candidate_email, c.full_name, folder.getId(), gen.pdfFile,
+    [c.senior_email, requesterEmail]);
 
-  var systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f));
+  var systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f), c.team);
   var prov = provisionAll_(folder.getId(), systems, ctx);
 
   return {
@@ -76,7 +78,9 @@ function _quay1Fields_(f) {
     contact_number: f.contact || f['contact_number'] || '',
     senior_broker: f.senior_name || f['senior_broker'] || '',
     senior_email: f.senior_email || '',
-    activity: f.designation || f['activity'] || '',
+    // `activity` is now the broker-activity CODE (sell_res_sb, rent_res_jb, ...) the picker sends.
+    // Fall back to the legacy designation field so an older payload still fills something.
+    activity: String(f.activity || f['activity'] || f.designation || '').trim(),
     start_date: f.start_date || '',
     team: f.team || '',
     commission: f.commission || '',
@@ -99,7 +103,9 @@ function genQuay1Contract_(folder, c) {
   b.replaceText('\\{\\{START_DATE\\}\\}', fmtDate_(c.start_date));
   b.replaceText('\\{\\{SENIOR_BROKER\\}\\}', String(c.senior_broker || ''));
   b.replaceText('\\{\\{COMMISSION\\}\\}', String(c.commission || ''));
-  b.replaceText('\\{\\{BROKER_ACTIVITY\\}\\}', String(c.activity || ''));
+  // {{BROKER_ACTIVITY}} takes the full clause DEFINITION for the chosen activity code, not the
+  // code itself. Falls back to the raw value so a free-text/legacy activity still renders.
+  b.replaceText('\\{\\{BROKER_ACTIVITY\\}\\}', brokerActivityDef_(c.activity) || String(c.activity || ''));
   doc.saveAndClose();
 
   var pdfBlob = DriveApp.getFileById(copyId).getAs('application/pdf');
@@ -107,14 +113,30 @@ function genQuay1Contract_(folder, c) {
   return { docId: copyId, url: DriveApp.getFileById(copyId).getUrl(), pdfUrl: pdfFile.getUrl(), pdfFile: pdfFile };
 }
 
-/** Sale vs Rental template id. The UI `deal_type` (sale|rental) is the EXPLICIT override; when
- *  it is absent we fall back to the broker activity mentioning "rent" (team lead / CONTRACTS
- *  8.1). Everything else defaults to Sale. */
+/** Sale vs Rental template id. The UI `deal_type` (sale|rental) is the EXPLICIT override; when it
+ *  is absent we derive it from the broker-activity code (rent_res_* -> Rental, sell_res_* -> Sale;
+ *  any legacy value mentioning "rent" -> Rental). Everything else defaults to Sale. */
 function quay1TemplateFor_(dealType, activity) {
   var dt = String(dealType || '').trim().toLowerCase();
-  var isRental = dt ? (dt === 'rental' || dt === 'rent') : /rent/i.test(String(activity || ''));
+  var isRental = dt ? (dt === 'rental' || dt === 'rent') : /^rent_|(?:^|\W)rent/i.test(String(activity || ''));
   var key = isRental ? PROP.QUAY1_TEMPLATE_RENTAL : PROP.QUAY1_TEMPLATE_SALE;
   return optProp_(key) || prop_(PROP.QUAY1_TEMPLATE_SALE, true);
+}
+
+/** Broker-activity clause definition for a code (CFG.BROKER_ACTIVITIES); '' if unknown/empty. */
+function brokerActivityDef_(code) {
+  var c = String(code || '').trim();
+  if (!c) return '';
+  var hit = (CFG.BROKER_ACTIVITIES || []).filter(function (a) { return a.code === c; })[0];
+  return hit ? hit.def : '';
+}
+
+/** Human label for a broker-activity code (for the tracker); '' if unknown/empty. */
+function brokerActivityLabel_(code) {
+  var c = String(code || '').trim();
+  if (!c) return '';
+  var hit = (CFG.BROKER_ACTIVITIES || []).filter(function (a) { return a.code === c; })[0];
+  return hit ? hit.label : '';
 }
 
 /** Save any base64 files the candidate submitted at contract-gen time into the folder. */
