@@ -462,3 +462,19 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .prog-chip.off { background: var(--card-2); color: var(--muted); border: 1px solid var(--line); }
 .prog-chip.none { background: transparent; color: var(--empty); border: 1px dashed var(--line); }
 .prog-legend .prog-chip { margin: 0 3px 0 8px; }
+
+/* ── Offboard tree ─────────────────────────────────────────────────────────
+   Senior -> reports rows with the accounts they hold + a per-person Offboard
+   action. Reuses the .prog-card / .prog-teamh / .prog-sech shells. */
+.offb-tr { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px;
+  padding: 8px 16px; border-top: 1px solid var(--line-2); }
+.offb-tr:first-of-type { border-top: 0; }
+.offb-tr.sr { background: var(--card-2); }
+.offb-nm { font-weight: 500; display: flex; align-items: center; gap: 8px; color: var(--ink); }
+.offb-tr.sr .offb-nm { font-weight: 700; }
+.offb-nm em { font-size: 10px; color: var(--accent); font-weight: 800; letter-spacing: .5px; font-style: normal; }
+.offb-acc { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.offb-go { white-space: nowrap; }
+.offb-summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.offb-summary dt { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.offb-summary dd { margin: 0; font-weight: 600; }
