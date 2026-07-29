@@ -35,6 +35,7 @@ function setupHub() {
   ensureOnboardingTab_(onb);
   ensureQueueTabs_(ss);
   ensureTeamDirectoryTab_(ss); // B.3 team -> groups/division/systems map (seed via setupTeamDirectory)
+  ensureAccountsTabs_(ss);     // Programs page rosters: CMA Accounts + PropData Accounts tabs
   _seedFlagDefaults_();
   var msg = 'setupHub complete. Tracker: ' + ss.getId() + '. Tabs: ' +
     ss.getSheets().map(function (s) { return s.getName(); }).join(', ') + '.';

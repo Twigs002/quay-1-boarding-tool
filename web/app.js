@@ -24,6 +24,7 @@
     onboardQuay1: 'onboard_quay1',
     onboardAqua: 'onboard_aqua',
     status: 'status',
+    programs: 'programs',
     retry: 'retry',
     offboard: 'offboard',
   };
@@ -171,7 +172,7 @@
 
   //  ROUTER
   const VIEWS = {
-    onboard: viewOnboard, provisioning: viewProvisioning,
+    onboard: viewOnboard, provisioning: viewProvisioning, programs: viewPrograms,
     offboard: (root) => window.HUB.viewOffboard(root),  // defined in app.offboard.js
   };
 
@@ -456,6 +457,88 @@
     } finally {
       btn.classList.remove('loading'); btn.disabled = false;
     }
+  }
+
+  //  PROGRAMS - who on a team holds CMA + PropData accounts (role-scoped by the backend)
+  function viewPrograms(root) {
+    const wrap = el(`<div class="stack">
+      <div class="section-head">
+        <h2>Programs</h2>
+        <p>CMA and PropData accounts per team, grouped by senior broker. A senior sees their own team; supers and admins see everyone.</p>
+      </div>
+      <div class="card card-pad">
+        <div class="toolbar">
+          <div class="muted" id="progMeta">Loading...</div>
+          <div class="toolbar-right">
+            <button type="button" class="btn btn-ghost btn-sm" id="progRefresh">Refresh</button>
+          </div>
+        </div>
+        <div class="prog-legend">
+          <span class="prog-chip ok">CMA</span> has a CMA account
+          <span class="prog-chip pd">Agent</span> full PropData agent
+          <span class="prog-chip pd">Spec #</span> property-specialist profile
+          <span class="prog-chip off">dimmed</span> inactive
+          <span class="prog-chip none">–</span> none
+        </div>
+        <div id="progBody"></div>
+      </div>
+    </div>`);
+    root.appendChild(wrap);
+    $('#progRefresh', wrap).addEventListener('click', () => loadPrograms(wrap, true));
+    loadPrograms(wrap, false);
+  }
+
+  let programsCache = null;
+  async function loadPrograms(wrap, force) {
+    const body = $('#progBody', wrap), meta = $('#progMeta', wrap);
+    body.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>`;
+    meta.textContent = 'Loading...';
+    try {
+      const r = (programsCache && !force) ? programsCache : await api(KINDS.programs, {});
+      programsCache = r;
+      renderPrograms(body, meta, r);
+    } catch (err) {
+      meta.textContent = '';
+      body.innerHTML = `<div class="state"><div class="state-title">Could not load Programs</div><div>${esc(err.message)}</div></div>`;
+    }
+  }
+
+  const SCOPE_LABEL = { all: 'all teams', senior: 'your team', self: 'your account' };
+  function renderPrograms(body, meta, r) {
+    const sections = (r && r.sections) || [];
+    const teamCount = sections.reduce((n, s) => n + (s.teams ? s.teams.length : 0), 0);
+    meta.textContent = sections.length
+      ? `Showing ${SCOPE_LABEL[r.scope] || ''} · ${teamCount} team(s)`
+      : '';
+    if (!sections.length) {
+      body.innerHTML = `<div class="state"><div class="state-title">Nothing to show</div><div>No team accounts are visible for your login yet.</div></div>`;
+      return;
+    }
+    const pdChip = (pd) => {
+      if (!pd) return `<span class="prog-chip none">–</span>`;
+      const lbl = pd.type === 'agent' ? 'Agent' : `Spec #${esc(pd.number)}`;
+      const cls = pd.active ? 'pd' : 'off';
+      return `<span class="prog-chip ${cls}">${lbl}</span>` + (pd.active ? '' : `<span class="prog-chip none">inactive</span>`);
+    };
+    const rowHtml = (p) => `<div class="prog-tr${p.senior ? ' sr' : ''}">
+        <span class="prog-nm">${p.senior ? '<span class="prog-star">★</span>' : '<span class="prog-star dim">·</span>'}${esc(p.name)}${p.senior ? ' <em>SENIOR</em>' : ''}</span>
+        <span>${p.cma ? '<span class="prog-chip ok">✓</span>' : '<span class="prog-chip none">–</span>'}</span>
+        <span>${pdChip(p.pd)}</span>
+      </div>`;
+    const teamHtml = (t) => {
+      const n = t.people.length;
+      const nc = t.people.filter((p) => p.cma).length;
+      const np = t.people.filter((p) => p.pd).length;
+      const head = t.name
+        ? `<div class="prog-teamh"><div class="prog-tname">${esc(t.name)}${t.senior ? `<span class="prog-tsr">Senior: ${esc(t.senior)}</span>` : ''}</div>
+             <div class="prog-tcount">CMA ${nc}/${n} · PropData ${np}/${n}</div></div>`
+        : '';
+      return `<div class="prog-card">${head}
+        <div class="prog-tbl"><div class="prog-th"><span>Broker</span><span>CMA</span><span>PropData</span></div>
+        ${t.people.map(rowHtml).join('')}</div></div>`;
+    };
+    body.innerHTML = sections.map((s) =>
+      `<div class="prog-sech">${esc(s.name)}</div>${s.teams.map(teamHtml).join('')}`).join('');
   }
 
   //  2. PROVISIONING STATUS

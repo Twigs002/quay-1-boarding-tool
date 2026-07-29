@@ -89,6 +89,13 @@ var CFG = {
     // (Team + Division) from the shared divisions directory; the Groups/Systems cols are filled in
     // by an admin. Read by teamMapping_ for Google provisioning + the divisions update.
     TEAM_DIRECTORY: 'Team Directory',
+    // Account rosters powering the Programs page (who holds CMA / PropData accounts). Refreshed by
+    // pasting the periodic exports. Kept in the PRIVATE tracker, never the public repo. Read by
+    // Programs.js. CMA Accounts: any @ email = a holder. PropData Accounts: the raw agents export
+    // (First Name / Last Name / Email / Active; a "Quay 1 Property Specialist" first-name marks a
+    // numbered specialist profile, its number = Last Name).
+    CMA_ACCOUNTS: 'CMA Accounts',
+    PROPDATA_ACCOUNTS: 'PropData Accounts',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
   DIVISIONS_URL: 'https://twigs002.github.io/quay-1-boarding-tool/data/divisions.json',

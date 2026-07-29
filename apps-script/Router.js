@@ -16,6 +16,7 @@
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
  *   offboard                       -> Offboarding.offboardRequest_(body, ctx)     [admin]
  *   status                         -> Queue.readForUi_(ctx)           [authed, role-scoped]
+ *   programs                       -> Programs.programsData_(ctx)     [authed, role-scoped]
  *   retry                          -> Queue.retryRow_(queue_id, ctx)  [super]
  *
  * doGet routes: FICA form (?f=<folderId> -> HTML), induction lookup (?i=<folderId> -> JSON),
@@ -79,6 +80,7 @@ function dispatch_(kind, body, ctx) {
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'status': return readForUi_(ctx);
+    case 'programs': return programsData_(ctx);
     case 'retry': return retryRow_(String(body.queue_id || ''), ctx);
     default: return { ok: false, error: 'unknown action: ' + kind };
   }
