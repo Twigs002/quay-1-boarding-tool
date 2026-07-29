@@ -40,17 +40,6 @@
     { key: 'dialfire',   label: 'Dialfire',          sub: 'dialer seat' },
   ];
 
-  // Broker programs on the Quay 1 form (docs/CONTRACTS.md section 6) - distinct
-  // from provisioning. cma/dialfire programs auto-tick the matching system;
-  // whatsapp/training/other never provision. `other` reveals a note field.
-  const PROGRAMS = [
-    { key: 'cma',      label: 'CMA',      system: 'cma' },
-    { key: 'dialfire', label: 'Dialfire', system: 'dialfire' },
-    { key: 'whatsapp', label: 'WhatsApp Business' },
-    { key: 'training', label: 'Training' },
-    { key: 'other',    label: 'Other', note: true },
-  ];
-
   // Broker Activities (Quay 1) - the residential clause options from the Broker Agreement
   // template. Mirrors CFG.BROKER_ACTIVITIES on the backend AND the live recruitment frontend
   // (quay-hubspot). `code` is submitted; the backend merges the matching clause into the contract
@@ -282,27 +271,11 @@
         fieldText('work_hours', 'Work hours', { hint: 'e.g. Mon to Fri, 08:00 to 17:00' }) +
         fieldText('remuneration', 'Remuneration', { hint: 'Monthly package or rate.' });
 
-      // Provisioning systems: core three checked by default, cma/dialfire off
-      // (they auto-check from the Quay 1 programs group below).
+      // Provisioning systems: core three checked by default; cma/dialfire off (tick as needed).
       const systems = SYSTEMS.map((s) => `<label class="check">
         <input type="checkbox" name="sys_${s.key}" value="${s.key}" ${s.core ? 'checked' : ''}>
         <span><span class="ck-label">${esc(s.label)}</span><span class="ck-sub">${esc(s.sub)}</span></span>
       </label>`).join('');
-
-      // Broker programs (Quay 1 only). `other` reveals a note field.
-      const programs = PROGRAMS.map((p) => `<label class="check">
-        <input type="checkbox" name="prog_${p.key}" value="${p.key}" data-links="${p.system || ''}">
-        <span class="ck-label">${esc(p.label)}</span>
-      </label>`).join('');
-      const programsBlock = entity === 'aqua' ? '' : `
-        <fieldset>
-          <legend>Broker programs</legend>
-          <div class="check-grid">${programs}</div>
-          <div class="field full" id="otherNoteWrap" hidden style="margin-top:12px;">
-            <label for="f_program_other_note">Other program - note</label>
-            <input id="f_program_other_note" name="program_other_note" type="text" autocomplete="off">
-          </div>
-        </fieldset>`;
 
       const canOnboard = USER && USER.canOnboard;
       const brokerOnly = USER && USER.isBroker && !USER.isSuper && !USER.isAdmin;
@@ -324,8 +297,7 @@
         </div>
         <div class="form-section">
           <h3 class="fs-title">Provisioning</h3>
-          ${programsBlock}
-          <fieldset${programsBlock ? ' style="margin-top:18px"' : ''}>
+          <fieldset>
             <legend>Provision these systems</legend>
             <div class="check-grid">${systems}</div>
           </fieldset>
@@ -340,19 +312,6 @@
       form.querySelectorAll('.check input').forEach((i) => {
         const sync = () => i.closest('.check').classList.toggle('is-on', i.checked);
         sync(); i.addEventListener('change', sync);
-      });
-      // A cma/dialfire program mirrors its provisioning system; `other` reveals the note.
-      form.querySelectorAll('input[name^="prog_"]').forEach((p) => {
-        p.addEventListener('change', () => {
-          const linked = p.dataset.links;
-          if (linked) {
-            const sys = form.querySelector(`input[name="sys_${linked}"]`);
-            if (sys) { sys.checked = p.checked; sys.dispatchEvent(new Event('change')); }
-          }
-          if (p.value === 'other') {
-            const w = $('#otherNoteWrap', form); if (w) w.hidden = !p.checked;
-          }
-        });
       });
       // Quay 1: populate the Team dropdown from divisions.json and auto-fill the senior broker.
       // Both senior fields are editable and auto-fill on team change WITHOUT clobbering a manual
@@ -427,12 +386,6 @@
     data.entity = entity;
     // Backend reads the provisioning selection under `systems` (CONTRACTS section 6).
     data.systems = SYSTEMS.map((s) => s.key).filter((k) => form.querySelector(`input[name="sys_${k}"]`).checked);
-    // Broker programs are Quay 1 only and distinct from provisioning systems.
-    if (entity !== 'aqua') {
-      data.programs = PROGRAMS.map((p) => p.key).filter((k) => {
-        const box = form.querySelector(`input[name="prog_${k}"]`); return box && box.checked;
-      });
-    }
     data.requester_name = USER ? USER.name : '';
     data.requester_email = USER ? USER.email : '';
 
@@ -443,13 +396,12 @@
       const r = await api(kind, data);
       toast('Onboarding submitted', `Contract queued for ${data.name}. ${data.systems.length} system(s) to provision.`, 'ok');
       form.reset();
-      // Restore check defaults: core systems on, optional systems + programs off.
+      // Restore check defaults: core systems on, optional systems off.
       form.querySelectorAll('.check input').forEach((i) => {
         const sys = SYSTEMS.find((s) => i.name === `sys_${s.key}`);
         i.checked = !!(sys && sys.core);
         i.closest('.check').classList.toggle('is-on', i.checked);
       });
-      const noteWrap = $('#otherNoteWrap', form); if (noteWrap) noteWrap.hidden = true;
       form.querySelectorAll('[aria-invalid]').forEach((i) => i.removeAttribute('aria-invalid'));
       if (r && r.folderId) statusCache = [];  // force a refresh next time status opens
     } catch (err) {
@@ -493,8 +445,17 @@
     const body = $('#progBody', wrap), meta = $('#progMeta', wrap);
     body.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>`;
     meta.textContent = 'Loading...';
+    // The first POST to a cold Apps Script /exec occasionally returns a non-JSON body
+    // ("Bad response from server"); it always succeeds on a retry. So retry twice, briefly,
+    // before surfacing an error - the user should not have to hit Refresh.
     try {
-      const r = (programsCache && !force) ? programsCache : await api(KINDS.programs, {});
+      if (programsCache && !force) { renderPrograms(body, meta, programsCache); return; }
+      let r, lastErr;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { r = await api(KINDS.programs, {}); lastErr = null; break; }
+        catch (e) { lastErr = e; await new Promise((res) => setTimeout(res, 600)); }
+      }
+      if (lastErr) throw lastErr;
       programsCache = r;
       renderPrograms(body, meta, r);
     } catch (err) {
