@@ -100,7 +100,7 @@ function _pdLookup_(pd, normEmail, name) {
 /** CMA holders as a set-like object keyed by normalised email (any @ cell in the tab counts). */
 function _cmaSet_() {
   var set = {};
-  _tabRows_(CFG.CMA_ACCOUNTS).forEach(function (row) {
+  _tabRows_(CFG.TAB.CMA_ACCOUNTS).forEach(function (row) {
     row.forEach(function (cell) {
       var v = String(cell == null ? '' : cell);
       if (v.indexOf('@') >= 0) { var e = _normEmail_(v); if (e) set[e] = true; }
@@ -112,7 +112,7 @@ function _cmaSet_() {
 /** PropData rosters: { byEmail: {email:{type,number,active}}, byName: {normName:{...}} }.
  *  Reads by header name so the raw export (with all its stat columns) pastes in as-is. */
 function _propdataMaps_() {
-  var rows = _tabRows_(CFG.PROPDATA_ACCOUNTS);
+  var rows = _tabRows_(CFG.TAB.PROPDATA_ACCOUNTS);
   var maps = { byEmail: {}, byName: {} };
   if (!rows.length) return maps;
   var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
@@ -183,8 +183,8 @@ function _normName_(name) {
 
 /** Create/repair the two roster tabs with header rows (idempotent). Returns nothing. */
 function ensureAccountsTabs_(ss) {
-  _ensureHeaderTab_(ss, CFG.CMA_ACCOUNTS, CMA_HEADERS);
-  _ensureHeaderTab_(ss, CFG.PROPDATA_ACCOUNTS, PROPDATA_HEADERS);
+  _ensureHeaderTab_(ss, CFG.TAB.CMA_ACCOUNTS, CMA_HEADERS);
+  _ensureHeaderTab_(ss, CFG.TAB.PROPDATA_ACCOUNTS, PROPDATA_HEADERS);
 }
 
 function _ensureHeaderTab_(ss, name, headers) {
