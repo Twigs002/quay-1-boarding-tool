@@ -18,7 +18,7 @@
  *
  * Public surface:
  *   programsData_(ctx)        - { scope:'all'|'senior'|'self', sections:[...], generated } | throws.
- *   ensureAccountsTabs_(ss)   - create/repair the two roster tabs + headers (idempotent).
+ *   ensureAccountsTabs_(ss)   - create the two roster tabs (header row written only when empty).
  */
 
 var CMA_HEADERS = ['First', 'Last', 'Email'];
@@ -38,11 +38,14 @@ function programsData_(ctx) {
 
   var me = _normEmail_(ctx.email);
 
-  // Teams where the caller is the senior (first-listed broker).
+  // Teams where the caller is the senior. Keyed on the team's seniorEmail (the RAW first-listed
+  // broker slot, computed in _programsTree_), NOT on people[0] - people[] skips blank-name slots,
+  // so a blank slot 0 would otherwise promote the next member to senior and leak the whole team.
+  // Fails closed: a team with no identifiable senior email matches nobody.
   var mine = [];
   full.forEach(function (s) {
     var teams = (s.teams || []).filter(function (t) {
-      return t.people[0] && _normEmail_(t.people[0].email) === me && !!me;
+      return !!me && !!t.seniorEmail && t.seniorEmail === me;
     });
     if (teams.length) mine.push({ name: s.name, teams: teams });
   });
@@ -63,81 +66,101 @@ function programsData_(ctx) {
 
 // ---------------------------------------------------------------- tree build
 
-/** Build sections -> teams -> people[{name,email,senior,cma,pd}] from divisions + rosters. */
+/** Build sections -> teams -> people[{name,email,senior,cma,pd}] from divisions + rosters.
+ *  Each team carries seniorEmail = the RAW first-listed broker slot's email (the authority for
+ *  senior-scope; '' when slot 0 has no email, so scope fails closed). A person is flagged senior
+ *  iff their email matches seniorEmail. */
 function _programsTree_(div, cma, pd) {
   var out = [];
   ((div && div.sections) || []).forEach(function (sec) {
     var teams = [];
     (sec.teams || []).forEach(function (t) {
+      var brokers = t.brokers || [];
+      var seniorEmail = _normEmail_((brokers[0] && brokers[0].email) || '');
+      var seniorName = (brokers[0] && brokers[0].name) || '';
       var people = [];
-      (t.brokers || []).forEach(function (b, i) {
+      brokers.forEach(function (b) {
         if (!b || !b.name) return;
         var e = _normEmail_(b.email);
-        var rec = _pdLookup_(pd, e, b.name);
         people.push({
-          name: b.name, email: b.email || '', senior: i === 0,
-          cma: !!e && !!cma[e], pd: rec,
+          name: b.name, email: b.email || '', senior: !!e && e === seniorEmail,
+          cma: !!e && !!cma[e], pd: _pdLookup_(pd, e),
         });
       });
-      if (people.length) teams.push({ name: t.name, senior: people[0].name, people: people });
+      if (people.length) teams.push({ name: t.name, seniorEmail: seniorEmail, senior: seniorName, people: people });
     });
     if (teams.length) out.push({ name: sec.name, teams: teams });
   });
   return out;
 }
 
-/** PropData record for a person: email first (dot-insensitive), then full-name fallback (agents
- *  only - specialist profiles carry the slot label, not the person's name). null if none. */
-function _pdLookup_(pd, normEmail, name) {
-  if (normEmail && pd.byEmail[normEmail]) return pd.byEmail[normEmail];
-  var k = _normName_(name);
-  if (k && pd.byName[k]) return pd.byName[k];
-  return null;
+/** PropData record for a person, matched by dot-insensitive email ONLY. A full-name fallback was
+ *  removed: two different people sharing a name would be mis-attributed each other's account. When
+ *  an email genuinely differs across systems the row fails closed (shows "none") rather than lying. */
+function _pdLookup_(pd, normEmail) {
+  return (normEmail && pd.byEmail[normEmail]) || null;
 }
 
 // ---------------------------------------------------------------- roster readers
 
-/** CMA holders as a set-like object keyed by normalised email (any @ cell in the tab counts). */
+/** CMA holders as a set-like object keyed by normalised email. Reads the "Email" column by header
+ *  so a stray address in another column (e.g. an "added by") is NOT counted as a holder. Falls back
+ *  to scanning every @-bearing cell only when the tab has no Email header (a headerless paste). */
 function _cmaSet_() {
   var set = {};
-  _tabRows_(CFG.TAB.CMA_ACCOUNTS).forEach(function (row) {
-    row.forEach(function (cell) {
-      var v = String(cell == null ? '' : cell);
-      if (v.indexOf('@') >= 0) { var e = _normEmail_(v); if (e) set[e] = true; }
+  var rows = _tabRows_(CFG.TAB.CMA_ACCOUNTS);
+  if (!rows.length) return set;
+  var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
+  var ei = head.indexOf('email');
+  if (ei >= 0) {
+    for (var r = 1; r < rows.length; r++) { var e = _normEmail_(rows[r][ei]); if (e) set[e] = true; }
+  } else {
+    logAudit_('programs_cma_no_email_header', { head: head });
+    rows.forEach(function (row) {
+      row.forEach(function (cell) {
+        var v = String(cell == null ? '' : cell);
+        if (v.indexOf('@') >= 0) { var e = _normEmail_(v); if (e) set[e] = true; }
+      });
     });
-  });
+  }
   return set;
 }
 
-/** PropData rosters: { byEmail: {email:{type,number,active}}, byName: {normName:{...}} }.
- *  Reads by header name so the raw export (with all its stat columns) pastes in as-is. */
+/** Active flag from a roster cell - tolerant of "Yes"/"No" strings, booleans, checkboxes, "1". */
+function _isActive_(v) {
+  if (v === true) return true;
+  if (v === false) return false;
+  var s = String(v == null ? '' : v).trim().toLowerCase();
+  return s === 'yes' || s === 'true' || s === 'y' || s === 'active' || s === '1';
+}
+
+/** PropData rosters keyed by normalised email: { byEmail: {email:{type,number,active}} }. Reads by
+ *  header name so the raw agents export (with all its stat columns) pastes in as-is. A "Quay 1
+ *  Property Specialist" First Name marks a numbered specialist profile (number = Last Name). Logs
+ *  and returns empty (fail loud, not silent) if no Email header is found on a populated tab. */
 function _propdataMaps_() {
   var rows = _tabRows_(CFG.TAB.PROPDATA_ACCOUNTS);
-  var maps = { byEmail: {}, byName: {} };
+  var maps = { byEmail: {} };
   if (!rows.length) return maps;
   var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
   var ci = {
     first: head.indexOf('first name'), last: head.indexOf('last name'),
     email: head.indexOf('email'), active: head.indexOf('active'),
   };
-  if (ci.email < 0) return maps; // no usable header row
+  if (ci.email < 0) { logAudit_('programs_propdata_no_email_header', { head: head }); return maps; }
   for (var r = 1; r < rows.length; r++) {
     var row = rows[r];
-    var email = _normEmail_(ci.email >= 0 ? row[ci.email] : '');
+    var email = _normEmail_(row[ci.email]);
     if (!email) continue;
     var first = ci.first >= 0 ? String(row[ci.first] || '') : '';
     var last = ci.last >= 0 ? String(row[ci.last] || '') : '';
-    var active = ci.active >= 0 ? String(row[ci.active] || '').trim().toLowerCase() === 'yes' : true;
+    var active = ci.active >= 0 ? _isActive_(row[ci.active]) : true;
     var isSpec = /specialist/i.test(first);
     var rec = isSpec
       ? { type: 'specialist', number: String(last).trim(), active: active }
       : { type: 'agent', number: '', active: active };
     // Prefer an active profile if the same email appears twice.
     if (!maps.byEmail[email] || (active && !maps.byEmail[email].active)) maps.byEmail[email] = rec;
-    if (!isSpec) {
-      var nk = _normName_(first + ' ' + last);
-      if (nk && (!maps.byName[nk] || (active && !maps.byName[nk].active))) maps.byName[nk] = rec;
-    }
   }
   return maps;
 }
@@ -176,12 +199,10 @@ function _normEmail_(e) {
   return s.slice(0, at).replace(/\./g, '') + s.slice(at);
 }
 
-/** Normalise a full name for fallback matching (lower, collapse whitespace, strip punctuation). */
-function _normName_(name) {
-  return String(name == null ? '' : name).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-/** Create/repair the two roster tabs with header rows (idempotent). Returns nothing. */
+/** Ensure the two roster tabs EXIST, writing the header row only when a tab is brand-new/empty.
+ *  It deliberately does NOT rewrite headers on a populated tab (that would mislabel a raw-export
+ *  paste whose columns sit in a different order); the readers instead locate columns by header
+ *  name and log if the Email header is missing. Idempotent. */
 function ensureAccountsTabs_(ss) {
   _ensureHeaderTab_(ss, CFG.TAB.CMA_ACCOUNTS, CMA_HEADERS);
   _ensureHeaderTab_(ss, CFG.TAB.PROPDATA_ACCOUNTS, PROPDATA_HEADERS);
@@ -189,9 +210,7 @@ function ensureAccountsTabs_(ss) {
 
 function _ensureHeaderTab_(ss, name, headers) {
   var sh = ss.getSheetByName(name) || ss.insertSheet(name);
-  var head = sh.getRange(1, 1, 1, headers.length).getValues()[0];
-  var needs = headers.some(function (h, i) { return String(head[i] || '').trim() !== h; });
-  if (needs && sh.getLastRow() === 0) {
+  if (sh.getLastRow() === 0) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
     sh.setFrozenRows(1);
   }
