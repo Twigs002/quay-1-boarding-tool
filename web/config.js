@@ -17,7 +17,7 @@ window.QUAY_CFG = Object.freeze({
   // Synthetic email domain used internally for PIN-based auth.
   AUTH_EMAIL_DOMAIN: 'quay1.local',
 
-  // Consolidated Apps Script web app /exec URL. BLANK until the backend is
-  // deployed; set it after `clasp login` + deploy, then re-push.
-  LIFECYCLE_ENDPOINT: '',
+  // Consolidated Apps Script web app /exec URL (deployed as pagan@quay1.co.za,
+  // executeAs USER_DEPLOYING, access ANYONE_ANONYMOUS). Health ping returns "ok".
+  LIFECYCLE_ENDPOINT: 'https://script.google.com/macros/s/AKfycbxxz6URW_jE1hiREWXCIQLrwulOaYOmm0DPHAnMGZRpRexxFK1juqurV97mxT8oNK3Y/exec',
 });

@@ -67,6 +67,44 @@ function _seedFlagDefaults_() {
   });
 }
 
+/**
+ * One-shot LIVE bootstrap for everything non-secret. Run this ONCE from the Apps Script editor
+ * after the first deploy: it triggers the OAuth consent for all project scopes (incl.
+ * admin.directory - click Allow), seeds WEBAPP_URL (only if unset), stores the PUBLIC Supabase
+ * url + anon key (same values already served in web/config.js - NOT secrets, every table is
+ * RLS-gated), then creates the tracker tabs and installs the triggers. Idempotent.
+ *
+ * NOTE on WEBAPP_URL: from the editor, ScriptApp.getService().getUrl() returns the /dev HEAD url,
+ * which requires a Workspace login and so is useless for the candidate FICA/induction links.
+ * This only SEEDS it when unset; set the real versioned /exec url via setWebappUrl(execUrl) or the
+ * Script Properties UI. bootstrapLive never overwrites an existing WEBAPP_URL.
+ *
+ * Still set separately afterwards (real ids / secrets, never in source): the contract template
+ * Doc ids + Drive parent folders (setQuay1Templates / setAquaTemplates) and, once chosen, the
+ * team->groups source. hubStatus() prints what remains unset.
+ */
+function bootstrapLive() {
+  var out = [];
+  // Seed WEBAPP_URL only when unset - never clobber a real /exec url with the editor's /dev url.
+  if (!optProp_(PROP.WEBAPP_URL)) {
+    var url = '';
+    try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
+    if (url) { setWebappUrl(url); out.push('WEBAPP_URL <- ' + url + ' (SEEDED /dev - replace with the /exec url)'); }
+    else { out.push('WEBAPP_URL still unset (run setWebappUrl(execUrl) by hand)'); }
+  } else {
+    out.push('WEBAPP_URL already set - left as is');
+  }
+  // PUBLIC values, identical to web/config.js (anon key is public by design; RLS gates all tables).
+  setSupabase('https://dqszbqiimbfvmmnpgpsb.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxc3picWlpbWJmdm1tbnBncHNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NDk4OTQsImV4cCI6MjA5NjQyNTg5NH0.M9RQnJEidyIMZAwbELTSPakiSnvuWBdHTjD7nuOdCZY');
+  out.push('SUPABASE_URL + SUPABASE_ANON_KEY <- public values');
+  out.push(setupHub());
+  out.push(setupTriggers());
+  var msg = 'bootstrapLive done:\n  ' + out.join('\n  ');
+  Logger.log(msg);
+  return msg;
+}
+
 // ---------------------------------------------------------------- secret setters
 
 function setSupabase(url, anon, service) {
