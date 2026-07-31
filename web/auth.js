@@ -35,7 +35,7 @@ window.AUTH = (() => {
     if (!staff) return { ok: false, error: 'No staff record for this login.' };
     if (staff.active === false) return { ok: false, error: 'This account is disabled.' };
     const isSuper = !!staff.is_super, isAdmin = !!staff.is_admin,
-          isBroker = !!staff.is_broker;
+          isBroker = !!staff.is_senior_broker;
     if (!isSuper && !isAdmin && !isBroker) {
       return { ok: false, error: 'This login has no lifecycle-hub access.' };
     }
