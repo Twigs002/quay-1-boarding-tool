@@ -37,6 +37,13 @@
   --shadow:    0 2px 6px rgba(30,46,89,.07), 0 8px 24px rgba(30,46,89,.07);
   --sans: 'Montserrat', system-ui, -apple-system, sans-serif;
 
+  /* ── Unified Quay 1 header (shared spec across all apps) ──────── */
+  --hdr-logo:    52px;   /* brand lockup height — middle ground, echoes the dashboard */
+  --hdr-pad-y:   16px;   /* topbar vertical padding */
+  --hdr-divider: 44px;   /* vertical divider height */
+  --hdr-title:   20px;   /* app title size */
+  --hdr-h:       84px;   /* total bar height = logo + 2*pad-y; sub-nav sticks here */
+
   /* Accent tokens - Quay 1 navy+gold for BOTH entities (Aqua's live emails use
      the same Quay palette; per architect there is no separate Aqua theme). Aqua
      is distinguished only by a small entity tag, not a palette swap. */
@@ -82,13 +89,13 @@ a { color: var(--blue-800); }
 }
 .topbar .bar-inner {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
-  padding-top: 16px; padding-bottom: 16px;
+  padding-top: var(--hdr-pad-y); padding-bottom: var(--hdr-pad-y);
 }
-.topbar-left { display: flex; align-items: center; gap: 18px; }
-.brand-logo { height: 42px; width: auto; display: block; flex: none; }
-.topbar-divider { width: 1px; height: 38px; background: rgba(255,255,255,.28); flex: none; }
+.topbar-left { display: flex; align-items: center; gap: 20px; }
+.brand-logo { height: var(--hdr-logo); width: auto; display: block; flex: none; }
+.topbar-divider { width: 1px; height: var(--hdr-divider); background: rgba(255,255,255,.28); flex: none; }
 .topbar-titles h1 {
-  font-size: 18px; font-weight: 800; margin: 0; letter-spacing: .04em;
+  font-size: var(--hdr-title); font-weight: 800; margin: 0; letter-spacing: .04em;
   color: #fff; text-transform: uppercase;
 }
 .topbar-titles p { margin: 2px 0 0; font-size: 12.5px; color: rgba(255,255,255,.78); }
@@ -96,7 +103,7 @@ a { color: var(--blue-800); }
 
 /* ─── Tab nav ───────────────────────────────────────────────── */
 .tab-nav {
-  position: sticky; top: 58px; z-index: 9;
+  position: sticky; top: var(--hdr-h); z-index: 9;
   background: var(--paper); border-bottom: 1px solid var(--line);
 }
 .tab-nav .bar-inner { display: flex; gap: 4px; padding-top: 8px; padding-bottom: 0; }
@@ -350,10 +357,9 @@ body.pre-auth .main { display: none !important; }
 
 /* ─── Responsive ────────────────────────────────────────────── */
 @media (max-width: 720px) {
+  :root { --hdr-logo: 42px; --hdr-pad-y: 12px; --hdr-title: 16px; --hdr-h: 66px; }
   .form-grid { grid-template-columns: 1fr; }
   .topbar-titles p { display: none; }
-  .brand-logo { height: 34px; }
-  .tab-nav { top: 52px; }
   .offb-summary dl { grid-template-columns: 1fr; gap: 2px 0; }
   .offb-summary dt { margin-top: 8px; }
 }
@@ -369,9 +375,9 @@ body.pre-auth .main { display: none !important; }
 /* Warmer page backdrop with a faint brand wash at the top. */
 body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px); }
 
-/* Topbar: subtle depth + gradient so the navy reads richer. */
-.topbar { background: linear-gradient(180deg, #43619F 0%, var(--blue-800) 100%); }
-.topbar-titles h1 { font-size: 17px; letter-spacing: .12em; }
+/* Topbar: flat brand blue, matching the other Quay 1 apps (unified header). */
+.topbar { background: var(--blue-800); }
+.topbar-titles h1 { letter-spacing: .04em; }
 .topbar-titles p { letter-spacing: .04em; }
 
 /* Tabs: clearer active state with a soft chip on hover. */

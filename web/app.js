@@ -240,7 +240,7 @@
 
     function renderForm() {
       const common =
-        fieldText('name', 'Full name', { required: true, full: true }) +
+        fieldText('name', 'Full name', { required: true }) +
         fieldText('id_number', 'ID number', { required: true }) +
         fieldText('contact', 'Cell number', { required: true, type: 'tel' }) +
         fieldText('email', 'Personal email', { required: true, type: 'email', hint: 'Used to send the contract + induction pack.' }) +
