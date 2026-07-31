@@ -186,7 +186,7 @@
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Onboard a new person</h2>
-        <p>Generate the contract and enqueue account provisioning. Choose the entity, then complete the details. Fields marked with a red asterisk are required.</p>
+        <p>Generate the contract and record the systems to provision. Accounts are created in the weekly Wednesday 08:00 batch, once the signed contract and FICA documents are in. Choose the entity, then complete the details. Fields marked with a red asterisk are required.</p>
       </div>
       <div class="card card-pad stack">
         <div class="seg" role="tablist" aria-label="Entity">
@@ -304,7 +304,7 @@
         </div>
         ${gate}
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary" id="obSubmit" ${canOnboard ? '' : 'disabled'}>Create contract &amp; provision</button>
+          <button type="submit" class="btn btn-primary" id="obSubmit" ${canOnboard ? '' : 'disabled'}>Create contract</button>
           <button type="reset" class="btn btn-ghost">Clear</button>
         </div>`;
 
@@ -394,7 +394,7 @@
     try {
       const kind = entity === 'aqua' ? KINDS.onboardAqua : KINDS.onboardQuay1;
       const r = await api(kind, data);
-      toast('Onboarding submitted', `Contract queued for ${data.name}. ${data.systems.length} system(s) to provision.`, 'ok');
+      toast('Onboarding submitted', `Contract sent to ${data.name}. Accounts are created in the Wednesday 08:00 batch once their signed contract + FICA docs are in (${data.systems.length} system(s) queued).`, 'ok');
       form.reset();
       // Restore check defaults: core systems on, optional systems off.
       form.querySelectorAll('.check input').forEach((i) => {
@@ -637,6 +637,8 @@
   function onSignedIn() {
     document.body.classList.remove('pre-auth');
     const gate = $('#loginGate'); if (gate) gate.remove();  // uncover the app shell
+    // Shared cross-app switcher on the Quay 1 flag (superusers only; no-op else).
+    if (window.QuayNav) window.QuayNav.mount({ isSuper: !!(USER && USER.isSuper), current: 'boarding' });
     const so = $('#signOutBtn'); so.hidden = false;
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' - ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
