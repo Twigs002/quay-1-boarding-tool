@@ -1,9 +1,9 @@
 /* Quay 1 Boarding Tool - frontend config.
  *
- * Copy this file to web/config.js and fill in the values. config.js is
- * gitignored; NEVER commit it. The Supabase anon key is public (all tables are
- * gated by Postgres RLS) so it is safe on a static host, but we keep it out of
- * source control so the endpoint URL and keys live in one deployed-only place.
+ * Copy this file to web/config.js and fill in the values. config.js IS
+ * committed (like quay-hubspot/config.js) so it ships to the GitHub Pages site:
+ * the Supabase anon key is public by design (all tables are gated by Postgres
+ * RLS) and the /exec URL is not a secret, so both are safe on a static host.
  *
  * Same Supabase project as quay-clock / quay-leads / quay-hubspot, so staff
  * sign in with the same username + PIN they use everywhere else.

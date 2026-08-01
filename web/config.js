@@ -5,10 +5,10 @@
  * and auth is PIN-based via a synthetic <username>@quay1.local email, so staff
  * use the same login across all Quay 1 tools.
  *
- * LIFECYCLE_ENDPOINT is intentionally BLANK until the consolidated Apps Script
- * backend is deployed (needs `clasp login` as pagan@ - see docs, blocker B1).
- * While blank, login + browsing work; any submit shows "endpoint not set".
- * After deploy, paste the /exec URL here and re-push.
+ * LIFECYCLE_ENDPOINT points at the deployed consolidated Apps Script backend
+ * (blocker B1 cleared). A health GET to the /exec URL returns "ok". If it is
+ * ever re-blanked, login + browsing still work but any submit shows
+ * "endpoint not set"; after a re-deploy, paste the new /exec URL here and re-push.
  */
 window.QUAY_CFG = Object.freeze({
   // Supabase project "quay-clock" (PRODUCTION) - same as quay-hubspot/quay-leads/quay-clock.
