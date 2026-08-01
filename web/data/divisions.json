@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-29T13:28:33.481332+00:00",
+  "generated": "2026-08-01T18:05:19.986547+00:00",
   "source": "scripts/parse_divisions.py · data/divisions_source.xlsx",
   "stats": {
     "sections": 10,
@@ -863,7 +863,7 @@
         {
           "name": "Furys",
           "type": "Sales",
-          "suburbs": "Kraaifontein, Buhrein, Buh rein, Buh Rein, Buh-rein, Viking Village, Bonnie Brae, Bonnie Brook, Windsor Park Estate, Windsor Estate, Zoo Park, Windsor Park, Peerless Park North, Peerless Park East, Le Coste Estate, Stonewood, Peerless Park West",
+          "suburbs": "Kraaifontein, Buhrein, Buh rein, Buh Rein, Buh-rein, Viking Village, Bonnie Brae, Bonnie Brook, Windsor Park Estate, Windsor Estate, Zoo Park, Windsor Park, Peerless Park North, Peerless Park East, Le Coste Estate, Stonewood, Peerless Park West, Tuscany Glen",
           "hubspot_email": "furys@quay1.co.za",
           "hubspot_owner_id": "512880424",
           "hubspot_division": "Furys",
