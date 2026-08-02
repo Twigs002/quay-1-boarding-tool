@@ -362,6 +362,15 @@ body.pre-auth .main { display: none !important; }
   .topbar-titles p { display: none; }
   .offb-summary dl { grid-template-columns: 1fr; gap: 2px 0; }
   .offb-summary dt { margin-top: 8px; }
+  /* Let the header shrink instead of pushing the sign-out button off-screen */
+  .topbar-left { gap: 10px; min-width: 0; }
+  .topbar-titles { min-width: 0; }
+  .topbar-titles h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .signout-who { display: none; }   /* drop the name; the button already reads "Sign out" */
+  /* Tab bar becomes a single swipeable row rather than overflowing */
+  .tab-nav .bar-inner { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tab-nav .bar-inner::-webkit-scrollbar { display: none; }
+  .tab-btn { white-space: nowrap; flex: none; }
 }
 @media (max-width: 420px) {
   .tab-btn { padding: 10px 12px 12px; font-size: 12.5px; }
