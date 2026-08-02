@@ -1,12 +1,12 @@
 {
-  "generated": "2026-08-01T18:05:19.986547+00:00",
+  "generated": "2026-08-02T08:57:10.906809+00:00",
   "source": "scripts/parse_divisions.py · data/divisions_source.xlsx",
   "stats": {
-    "sections": 10,
-    "teams": 94,
+    "sections": 16,
+    "teams": 101,
     "brokers": 183,
     "specialists": 44,
-    "teams_with_hubspot": 78
+    "teams_with_hubspot": 82
   },
   "sections": [
     {
@@ -426,6 +426,16 @@
       "name": "Lions",
       "teams": [
         {
+          "name": "Lions",
+          "type": "Sales",
+          "suburbs": "Parklands FT, Parklands North FT, Rivergate FT, Summer greens FT",
+          "hubspot_email": "lions@greeffcity.co.za",
+          "hubspot_owner_id": "61022342",
+          "hubspot_division": "Lions",
+          "brokers": [],
+          "specialists": []
+        },
+        {
           "name": "Pirates",
           "type": "Sales",
           "suburbs": "Parklands ST, Sandown ST, Summer Greens FT/ST, Rivergate ST",
@@ -513,6 +523,21 @@
               "phone": "083 334 4554"
             }
           ],
+          "specialists": []
+        }
+      ]
+    },
+    {
+      "name": "Dolphins",
+      "teams": [
+        {
+          "name": "Dolphins",
+          "type": "Sales",
+          "suburbs": "",
+          "hubspot_email": "dolphins@quay1.co.za",
+          "hubspot_owner_id": "401875482",
+          "hubspot_division": "Dolphins",
+          "brokers": [],
           "specialists": []
         }
       ]
@@ -1544,6 +1569,21 @@
       ]
     },
     {
+      "name": "Dixies",
+      "teams": [
+        {
+          "name": "Dixies",
+          "type": "",
+          "suburbs": "",
+          "hubspot_email": "dixies@quay1.co.za",
+          "hubspot_owner_id": "537403564",
+          "hubspot_division": "Dixies",
+          "brokers": [],
+          "specialists": []
+        }
+      ]
+    },
+    {
       "name": "RESI SALES - SOMERSET WEST (OPEN BOARDER POLICY WITHIN SW)",
       "teams": [
         {
@@ -1645,6 +1685,66 @@
               "phone": "082 789 1821"
             }
           ],
+          "specialists": []
+        }
+      ]
+    },
+    {
+      "name": "Hunters",
+      "teams": [
+        {
+          "name": "Hunters",
+          "type": "",
+          "suburbs": "Southern Suburbs - All.",
+          "hubspot_email": "",
+          "hubspot_owner_id": "",
+          "hubspot_division": "",
+          "brokers": [],
+          "specialists": []
+        }
+      ]
+    },
+    {
+      "name": "Matchmakers",
+      "teams": [
+        {
+          "name": "Matchmakers",
+          "type": "",
+          "suburbs": "City Bowl - All.",
+          "hubspot_email": "matchmakers@quay1.co.za",
+          "hubspot_owner_id": "1331180998",
+          "hubspot_division": "",
+          "brokers": [],
+          "specialists": []
+        }
+      ]
+    },
+    {
+      "name": "Hotshots",
+      "teams": [
+        {
+          "name": "Hotshots",
+          "type": "",
+          "suburbs": "Atlantic Seaboard - All.",
+          "hubspot_email": "",
+          "hubspot_owner_id": "",
+          "hubspot_division": "",
+          "brokers": [],
+          "specialists": []
+        }
+      ]
+    },
+    {
+      "name": "Strikers",
+      "teams": [
+        {
+          "name": "Strikers",
+          "type": "",
+          "suburbs": "Western Seaboard - All.",
+          "hubspot_email": "",
+          "hubspot_owner_id": "",
+          "hubspot_division": "",
+          "brokers": [],
           "specialists": []
         }
       ]
