@@ -133,23 +133,29 @@ function _propdataRole_(person) {
 function provisionAll_(folderId, systems, ctx) {
   var person = _personFor_(folderId);
   var results = {};
+  var anyError = false;
 
   if (systems.indexOf('google') >= 0) {
     var g = _runInline_(person, 'google', function () { return googleCreate_(person); });
     results.google = g.status;
+    if (g.status === 'error') anyError = true;
     if (g.result && g.result.email) person.quay_email = g.result.email;
   }
 
   if (systems.indexOf('propdata') >= 0) {
     var p = _runInline_(person, 'propdata', function () { return propdataCreate_(person); });
     results.propdata = p.status;
+    if (p.status === 'error') anyError = true;
   }
 
   var browser = systems.filter(function (s) { return CFG.WORKER_SYSTEMS.indexOf(s) >= 0; });
   enqueueBrowserSystems_(person, browser, 'create');
   browser.forEach(function (s) { results[s] = 'pending'; });
 
-  return { ok: true, results: results };
+  // dryRun: in test mode the inline provisioners only log; nothing real was created, so callers must
+  // NOT mark the row permanently provisioned (it must still run for real once armed). anyError: an
+  // inline system threw and was recorded as an 'error' queue row, so the row is NOT fully set up.
+  return { ok: !anyError, results: results, anyError: anyError, dryRun: DRY_RUN_() };
 }
 
 // ---------------------------------------------------------------- deferred provisioning batch
@@ -187,7 +193,13 @@ function provisionReadyBatch_() {
       systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
     }
     try {
-      provisionAll_(o.folderId, systems, ctx);
+      var prov = provisionAll_(o.folderId, systems, ctx);
+      if (prov.anyError) {
+        setOnboardingStatus_(o.folderId, 'Setup error');
+        out.errors.push({ folderId: o.folderId, error: 'an inline system failed' });
+        return;   // leave provisioned_at empty so a later run retries it
+      }
+      if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
       out.provisioned.push(o.folderId);
@@ -208,25 +220,48 @@ function provisionReadyBatch_() {
  * provisioned is a no-op success. requireAdmin_ is asserted at the call site (Router._approveDispatch_).
  */
 function approveAndProvision_(folderId, ctx) {
-  var o = readOnboardingByFolder_(folderId);
-  if (!o) return { ok: false, error: 'onboarding row not found' };
-  if (o.provisioned_at) return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
-  if (!_docsReady_(o)) {
-    return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
-  }
-  // Stamp the approval FIRST so the gate is satisfied even if provisioning is later retried by the batch.
-  setOnboardingCell_(folderId, ONB_COL.approved_at, nowIso_());
-  setOnboardingCell_(folderId, ONB_COL.approved_by, (ctx && ctx.email) || 'admin');
-  logAudit_('onboard_approved', { folderId: folderId, by: (ctx && ctx.email) || '' });
+  // Serialise: two concurrent "Approve & set up" clicks must not both provision (double account).
+  // The lock also makes the read-check-provision-stamp one critical section.
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  try {
+    var o = readOnboardingByFolder_(folderId);
+    if (!o) return { ok: false, error: 'onboarding row not found' };
+    if (o.provisioned_at) return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
+    if (!_docsReady_(o)) {
+      return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
+    }
+    // Stamp the approval FIRST - a human approved, and that fact holds even if provisioning fails or
+    // is deferred (test mode). It satisfies the gate for any later retry by the batch.
+    var approvedAt = nowIso_();
+    var approvedBy = (ctx && ctx.email) || 'admin';
+    setOnboardingCell_(folderId, ONB_COL.approved_at, approvedAt);
+    setOnboardingCell_(folderId, ONB_COL.approved_by, approvedBy);
+    logAudit_('onboard_approved', { folderId: folderId, by: approvedBy });
 
-  var systems = safeJsonParse_(o.systems_json, null);
-  if (!Array.isArray(systems) || !systems.length) {
-    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+    var systems = safeJsonParse_(o.systems_json, null);
+    if (!Array.isArray(systems) || !systems.length) {
+      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+    }
+    var prov = provisionAll_(folderId, systems, ctx);
+
+    // Only mark the candidate PROVISIONED (dropping them off the pipeline) when real accounts were
+    // actually created. On an error, leave provisioned_at empty so it stays visible and retryable.
+    // In test mode (DRY_RUN), leave it too so the real batch provisions once armed.
+    if (prov.anyError) {
+      setOnboardingStatus_(folderId, 'Setup error');
+      return { ok: false, error: 'approved, but account setup hit an error - the candidate stays on the Progress report so it can be retried.', approved_at: approvedAt, provisioning: prov.results };
+    }
+    if (prov.dryRun) {
+      setOnboardingStatus_(folderId, 'Approved (test mode)');
+      return { ok: true, dryRun: true, approved_at: approvedAt, approved_by: approvedBy, message: 'Approved. The system is in test mode, so no live accounts were created yet.', provisioning: prov.results };
+    }
+    setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
+    setOnboardingStatus_(folderId, 'Provisioned');
+    return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
+  } finally {
+    lock.releaseLock();
   }
-  var prov = provisionAll_(folderId, systems, ctx);
-  setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
-  setOnboardingStatus_(folderId, 'Provisioned');
-  return { ok: true, approved_at: nowIso_(), approved_by: (ctx && ctx.email) || '', provisioning: prov.results };
 }
 
 /** Shallow copy of a provisioner result with the temp password stripped, so it never lands in the

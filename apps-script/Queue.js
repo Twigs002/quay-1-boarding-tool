@@ -160,8 +160,12 @@ function readForUi_(ctx) {
   // Scoped to a broker's own candidates for non-admins.
   var onboarding = _onboardingPipeline_(isAdmin, email);
   if (!isAdmin && email) {
+    // Scope the provisioning queue to ALL of the broker's own candidates (by requester_email), NOT the
+    // pipeline - the pipeline excludes already-provisioned rows, but their queue rows must still show.
     var mine = {};
-    onboarding.forEach(function (o) { mine[o.folderId] = true; });
+    listOnboarding_().forEach(function (o) {
+      if (String(o.requester_email).toLowerCase() === email) mine[o.folderId] = true;
+    });
     pq = pq.filter(function (r) { return mine[r.folderId]; });
     oq = []; // offboarding is admin-only visibility
   }

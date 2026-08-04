@@ -391,10 +391,8 @@
     if (name === 'candidate_email' || name === 'email' || name === 'senior_email') {
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email address.';
     }
-    if (name === 'id_number') {
-      // All-digits is treated as a SA ID (must be 13); anything with letters is a passport - accept.
-      return /^\d+$/.test(v) ? (v.length === 13 ? '' : 'A South African ID is 13 digits.') : '';
-    }
+    // id_number is left to a not-empty check only: SA IDs, foreign passports (all-digit or
+    // alphanumeric, varying lengths) are all valid here, so a strict format check falsely blocks people.
     if (name === 'commission') {
       return /^\d{1,3}(\.\d+)?$/.test(v) && Number(v) <= 100 ? '' : 'Enter a number between 0 and 100.';
     }
@@ -612,6 +610,9 @@
       host.innerHTML = `<div class="state"><div class="state-title">No one in progress</div><div>New hires appear here after onboarding, and stay until their accounts are set up.</div></div>`;
       return;
     }
+    // Approve hits requireAdmin_ on the backend, so only offer the button to admins/supers - a senior
+    // broker sees the state and can Send reminder, but never an Approve button that would 403.
+    const canApprove = USER && (USER.isAdmin || USER.isSuper);
     const docPill = (on, label) => `<span class="doc ${on ? 'doc-on' : 'doc-off'}">${on ? '✓' : '○'} ${label}</span>`;
     const cards = items.map((o) => {
       const ent = (o.entity || '').toLowerCase();
@@ -622,7 +623,7 @@
       const docs = `<div class="docs">
         ${docPill(o.docs && o.docs.contract, 'Contract')}${docPill(o.docs && o.docs.id, 'ID')}
         ${docPill(o.docs && o.docs.poa, 'Address')}${docPill(o.docs && o.docs.bank, 'Bank')}</div>`;
-      const approveBtn = (o.docs_ready && !o.approved)
+      const approveBtn = (canApprove && o.docs_ready && !o.approved)
         ? `<button type="button" class="btn btn-primary btn-sm" data-approve="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Approve &amp; set up</button>` : '';
       const remindBtn = !o.approved
         ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Send reminder</button>` : '';
@@ -649,8 +650,8 @@
         if (!confirm(`Approve ${name} and set up their accounts now? This creates their logins across all systems.`)) return;
         b.classList.add('loading'); b.disabled = true;
         try {
-          await api(KINDS.approve, { folderId: b.dataset.approve });
-          toast('Approved', `${name}'s accounts are being set up now.`, 'ok');
+          const r = await api(KINDS.approve, { folderId: b.dataset.approve });
+          toast('Approved', (r && r.message) ? r.message : `${name}'s accounts are being set up now.`, 'ok');
           statusCache = []; loadStatus(wrap, true);
         } catch (err) {
           toast('Could not approve', err.message, 'err');

@@ -114,7 +114,11 @@ function _provisionDispatch_(body, ctx) {
   if (!folderId) return { ok: false, error: 'folderId is required' };
   var o = readOnboardingByFolder_(folderId);
   if (!o) return { ok: false, error: 'onboarding row not found' };
-  if (!o.approved_at) return { ok: false, error: 'not approved: an admin must Approve & set up this candidate before (re)provisioning' };
+  // Guard the gate, but allow a retry for anyone already approved OR already provisioned (legacy rows
+  // predate the approved_at column - a provisioned row was implicitly approved when it went live).
+  if (!o.approved_at && !o.provisioned_at) {
+    return { ok: false, error: 'not approved: an admin must Approve & set up this candidate before (re)provisioning' };
+  }
   var systems = _provisionList_(body, body);
   if (!systems) {
     // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
