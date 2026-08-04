@@ -601,6 +601,18 @@
     renderStatus(body, null, rows);
   }
 
+  // Compact "3h ago" / "2d ago" from an ISO timestamp; '' if unparseable.
+  function timeAgo(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (isNaN(t)) return '';
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 90) return 'just now';
+    const m = s / 60; if (m < 60) return `${Math.round(m)}m ago`;
+    const h = m / 60; if (h < 24) return `${Math.round(h)}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+  }
+
   // The candidate pipeline: who is waiting on docs, who is ready to approve, who is being set up.
   function renderPipeline(host, meta, items, wrap) {
     const awaiting = items.filter((o) => o.docs_ready && !o.approved).length;
@@ -626,7 +638,8 @@
       const approveBtn = (canApprove && o.docs_ready && !o.approved)
         ? `<button type="button" class="btn btn-primary btn-sm" data-approve="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Approve &amp; set up</button>` : '';
       const remindBtn = !o.approved
-        ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Send reminder</button>` : '';
+        ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-reminded="${esc(o.reminded_at || '')}">Send reminder</button>` : '';
+      const remindedNote = o.reminded_at ? `<div class="pipe-reminded">Reminded ${esc(timeAgo(o.reminded_at))}</div>` : '';
       return `<div class="pipe-row">
         <div class="pipe-main">
           <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
@@ -636,6 +649,7 @@
         <div class="pipe-side">
           <span class="pill ${state.c}">${state.t}</span>
           <div class="pipe-actions">${approveBtn}${remindBtn}</div>
+          ${remindedNote}
         </div>
       </div>`;
     }).join('');
@@ -662,6 +676,9 @@
     host.querySelectorAll('[data-remind]').forEach((b) => {
       b.addEventListener('click', async () => {
         const name = b.dataset.name || 'this person';
+        const last = Date.parse(b.dataset.reminded || '');
+        if (!isNaN(last) && (Date.now() - last) < 60 * 60 * 1000
+            && !confirm(`${name} was already reminded less than an hour ago. Send another reminder?`)) return;
         b.classList.add('loading'); b.disabled = true;
         try {
           const r = await api(KINDS.remind, { folderId: b.dataset.remind });

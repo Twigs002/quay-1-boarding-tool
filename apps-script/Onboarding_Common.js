@@ -129,8 +129,9 @@ function _remindContract_(folderId, ctx) {
     var opts = { name: company.name, htmlBody: agreementEmailHtml_(company, first, ficaUrl) };
     if (pdf) opts.attachments = [pdf.getAs('application/pdf')];
     GmailApp.sendEmail(o.email, subject, plain, opts);
+    setOnboardingCell_(folderId, ONB_COL.reminded_at, nowIso_());
     logAudit_('contract_reminder_sent', { folderId: folderId, to: o.email, by: (ctx && ctx.email) || '' });
-    return { ok: true, sent: true, to: o.email };
+    return { ok: true, sent: true, to: o.email, reminded_at: nowIso_() };
   } catch (err) {
     logAudit_('contract_reminder_failed', { folderId: folderId, error: String(err) });
     return { ok: false, error: 'could not send the reminder: ' + String(err && err.message ? err.message : err) };

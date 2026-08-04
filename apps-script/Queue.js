@@ -191,6 +191,7 @@ function _onboardingPipeline_(isAdmin, email) {
       docs: { contract: !!o.fica_contract, id: !!o.fica_id, poa: !!o.fica_poa, bank: !!o.fica_bank },
       docs_ready: _docsReady_(o),
       approved: !!o.approved_at, approved_at: o.approved_at || '', approved_by: o.approved_by || '',
+      reminded_at: o.reminded_at || '',
     });
   });
   return out;

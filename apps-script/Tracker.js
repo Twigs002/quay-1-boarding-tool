@@ -56,6 +56,8 @@ var ONB_COL = {
   // clicks "Approve & set up". approved_at/approved_by are the ONLY thing that unlocks provisioning -
   // accounts are never created before this deliberate sign-off. See _approveDispatch_ / _provisionReady_.
   approved_at: 34, approved_by: 35,
+  // Last time a "Send reminder" follow-up went out, so the UI can show it + guard against spamming.
+  reminded_at: 36,
 };
 
 var ONB_HEADERS = [
@@ -65,7 +67,7 @@ var ONB_HEADERS = [
   'FICA NDA', 'FICA bank', 'FICA POA', 'FICA ID', 'FICA contract',
   'Programs', 'Induction Wed', 'Induction Thu', 'Status', 'Folder ID (key)',
   'FFC status', 'FFC number', 'PropData profile', 'Specialist ref',
-  'Systems (resolved)', 'Provisioned at', 'Approved at', 'Approved by',
+  'Systems (resolved)', 'Provisioned at', 'Approved at', 'Approved by', 'Reminded at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

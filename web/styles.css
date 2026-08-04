@@ -508,3 +508,4 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .pipe-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .pill.s-ready { background: #FBF3DA; color: #8A6D0B; }
 @media (max-width: 560px) { .pipe-side { align-items: stretch; width: 100%; } }
+.pipe-reminded { font-size: 11px; color: var(--muted); margin-top: 2px; }
