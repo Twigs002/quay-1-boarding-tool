@@ -40,25 +40,29 @@ function onboardQuay1_(body, ctx) {
   var requesterEmail = (ctx && ctx.email) || '';
   var requesterName = (ctx && ctx.name) || '';
 
+  // Resolve the systems to provision NOW (operator ticks + entitlements) but do NOT create anything:
+  // provisioning is deferred to provisionReadyBatch_ (Wednesday 08:00), which fires only once the
+  // signed contract + FICA docs are in. Persist the resolved list so the batch honours the operator's
+  // selection without re-deriving it.
+  var systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f), c.team, c.activity);
+
   upsertOnboardingRow_({
     folderId: folder.getId(), entity: 'quay1', name: c.full_name, id_number: c.id_number,
     email: c.candidate_email, contact: c.contact_number,
     start_date: fmtDate_(c.start_date), senior_name: c.senior_broker,
     senior_email: c.senior_email, requester_name: requesterName,
     requester_email: requesterEmail, designation: brokerActivityLabel_(c.activity) || c.activity, team: c.team,
-    commission: c.commission, programs: c.programs, status: 'Contract sent',
+    commission: c.commission, programs: c.programs, systems_json: JSON.stringify(systems),
+    status: 'Contract sent',
   });
 
   // CC the senior broker + requester on the welcome email, matching the live recruitment pipeline.
   var emailed = _emailContract_('quay1', c.candidate_email, c.full_name, folder.getId(), gen.pdfFile,
     [c.senior_email, requesterEmail]);
 
-  var systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f), c.team);
-  var prov = provisionAll_(folder.getId(), systems, ctx);
-
   return {
     ok: true, folderId: folder.getId(), folderUrl: folder.getUrl(), pdfUrl: gen.pdfUrl,
-    emailed: emailed, provisioning: prov.results,
+    emailed: emailed, provisioning_deferred: true, systems: systems,
   };
 }
 

@@ -26,9 +26,9 @@
  *
  * MANUAL RECOVERY: an 'error' row means a partial teardown that needs a human. The reaper drafts
  * an alert to CFG.INTERNAL_NOTIFY (Gmail Drafts, never sent). To recover: read google_result
- * (col I) for what completed, verify the Google account is suspended + groups removed + Drive
- * handled, confirm the Provisioning Queue has the browser-system deactivate rows, then set the OQ
- * row status to 'done'. The reaper never auto-retries an 'error' row (only 'scheduled'/'firing').
+ * (col I) for what completed, verify the Google account is suspended, confirm the Provisioning
+ * Queue has the browser-system deactivate rows, then set the OQ row status to 'done'. The reaper
+ * never auto-retries an 'error' row (only 'scheduled'/'firing').
  */
 
 function offboardRequest_(body, ctx) {
@@ -167,7 +167,7 @@ function _alertOffboardError_(r) {
       'and needs manual completion.\n\n' +
       'offb_id: ' + r.offb_id + '\nrequested by: ' + r.requested_by + '\n' +
       'google_result: ' + r.google_result + '\n\n' +
-      'Recover: verify the Google account is suspended, groups removed and Drive handled, confirm ' +
+      'Recover: verify the Google account is suspended, confirm ' +
       'the Provisioning Queue has the browser-system deactivate rows, then set this row status to ' +
       'done. See Offboarding.js MANUAL RECOVERY.',
       { name: company.name });

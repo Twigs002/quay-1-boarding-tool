@@ -22,6 +22,8 @@
  *   N agreement_type  O work_hours  P remuneration  Q commission
  *   R fica_nda  S fica_bank  T fica_poa  U fica_id  V fica_contract          (FICA ticks R..V)
  *   W programs(JSON)  X induction_wed  Y induction_thu  Z status  AA folderId(hidden key)
+ *   AB ffc_status  AC ffc_number  AD propdata_profile_type  AE specialist_ref   (FFC / PropData, appended after the key so column numbers above never shift)
+ *   AF systems_json  AG provisioned_at   (deferred provisioning: the systems resolved at onboard, and the batch's done-marker; provisioning no longer runs at onboard - see provisionReadyBatch_)
  *
  * Public surface:
  *   ONB_COL / ONB_HEADERS / FICA_COL            - the frozen column map + FICA doc-key->col.
@@ -42,6 +44,18 @@ var ONB_COL = {
   division: 13, agreement_type: 14, work_hours: 15, remuneration: 16, commission: 17,
   fica_nda: 18, fica_bank: 19, fica_poa: 20, fica_id: 21, fica_contract: 22,
   programs: 23, induction_wed: 24, induction_thu: 25, status: 26, folderId: 27,
+  // Appended AFTER the folderId key (28..31) so no existing column number shifts. FFC = Fidelity
+  // Fund Certificate status the candidate self-declares on FICA; propdata_profile_type is derived
+  // from it (full -> agent, candidate/none -> specialist). specialist_ref is filled later when the
+  // numbered PropData specialist profile is actually created (not at intake).
+  ffc_status: 28, ffc_number: 29, propdata_profile_type: 30, specialist_ref: 31,
+  // Deferred provisioning (appended, no shift): systems_json = the systems resolved at onboard time
+  // (operator ticks + entitlements), provisioned_at = the provisioning idempotency marker.
+  systems_json: 32, provisioned_at: 33,
+  // Human approval gate (appended, no shift): an admin reviews the signed contract + FICA docs and
+  // clicks "Approve & set up". approved_at/approved_by are the ONLY thing that unlocks provisioning -
+  // accounts are never created before this deliberate sign-off. See _approveDispatch_ / _provisionReady_.
+  approved_at: 34, approved_by: 35,
 };
 
 var ONB_HEADERS = [
@@ -50,6 +64,8 @@ var ONB_HEADERS = [
   'Agreement type', 'Work hours', 'Remuneration', 'Commission',
   'FICA NDA', 'FICA bank', 'FICA POA', 'FICA ID', 'FICA contract',
   'Programs', 'Induction Wed', 'Induction Thu', 'Status', 'Folder ID (key)',
+  'FFC status', 'FFC number', 'PropData profile', 'Specialist ref',
+  'Systems (resolved)', 'Provisioned at', 'Approved at', 'Approved by',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by
@@ -62,7 +78,7 @@ var FICA_COL = {
   contract: ONB_COL.fica_contract,
 };
 
-var ONB_WIDTH = ONB_HEADERS.length; // 27
+var ONB_WIDTH = ONB_HEADERS.length; // derived from the header list above
 
 /** Ensure the Onboarding tab exists with a header row and the key column hidden. */
 function ensureOnboardingTab_(sh) {

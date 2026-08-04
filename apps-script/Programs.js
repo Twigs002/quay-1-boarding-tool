@@ -24,13 +24,18 @@
 var CMA_HEADERS = ['First', 'Last', 'Email'];
 var PROPDATA_HEADERS = ['First Name', 'Last Name', 'Email', 'Active'];
 
+// The assembled tree is identical for every caller (role scoping happens per-request, AFTER this),
+// so it is safe to memoise across requests. The expensive part - one divisions HTTP fetch plus two
+// tracker-tab reads plus the tree build - is what made the authed 'programs' read hang; caching it
+// makes repeat loads return with zero I/O. Short TTL bounds staleness after an admin pastes a fresh
+// roster export. Fully fail-safe: any cache error just falls through to a rebuild.
+var PROGRAMS_CACHE_KEY = 'programs_tree_v1';
+var PROGRAMS_CACHE_TTL = 120; // seconds
+
 /** Assemble the Programs tree, scoped to the caller's role. Requires an authed ctx. */
 function programsData_(ctx) {
   if (!ctx || !ctx.role) throw new Error('unauthorized');
-  var div = _programsDivisions_();
-  var cma = _cmaSet_();
-  var pd = _propdataMaps_();
-  var full = _programsTree_(div, cma, pd);
+  var full = _programsFull_();
   var isAdmin = !!(ctx.role.is_super || ctx.role.is_admin);
   var stamp = nowIso_();
 
@@ -62,6 +67,38 @@ function programsData_(ctx) {
   });
   var sections = self ? [{ name: 'Your account', teams: [{ name: '', senior: '', people: [self] }] }] : [];
   return { scope: 'self', sections: sections, generated: stamp };
+}
+
+/** The full (unscoped) sections tree, memoised in the script cache for PROGRAMS_CACHE_TTL seconds.
+ *  Cache hits skip ALL I/O (no HTTP fetch, no sheet open/read). Any CacheService failure or an
+ *  over-limit payload is swallowed and we simply rebuild - the cache is an optimisation, never a
+ *  dependency. Returns the same shape _programsTree_ produces: [{ name, teams:[...] }]. */
+function _programsFull_() {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  if (cache) {
+    try {
+      var hit = cache.get(PROGRAMS_CACHE_KEY);
+      if (hit) return JSON.parse(hit);
+    } catch (e) { /* fall through to rebuild */ }
+  }
+  var full = _programsBuild_();
+  if (cache) {
+    try { cache.put(PROGRAMS_CACHE_KEY, JSON.stringify(full), PROGRAMS_CACHE_TTL); } catch (e) { /* payload too big / cache down - skip */ }
+  }
+  return full;
+}
+
+/** Build the full tree from source: one divisions fetch + both roster tabs read through a SINGLE
+ *  opened Spreadsheet (openById is slow, so we do it once and share it across both tab reads rather
+ *  than paying it per tab). Never throws - a failed open yields empty rosters (accounts show "none"). */
+function _programsBuild_() {
+  var div = _programsDivisions_();
+  var ss = null;
+  try { ss = sheet_(); } catch (e) { logAudit_('programs_sheet_open_failed', { error: String(e) }); }
+  var cma = _cmaSet_(ss);
+  var pd = _propdataMaps_(ss);
+  return _programsTree_(div, cma, pd);
 }
 
 // ---------------------------------------------------------------- tree build
@@ -106,9 +143,9 @@ function _pdLookup_(pd, normEmail) {
 /** CMA holders as a set-like object keyed by normalised email. Reads the "Email" column by header
  *  so a stray address in another column (e.g. an "added by") is NOT counted as a holder. Falls back
  *  to scanning every @-bearing cell only when the tab has no Email header (a headerless paste). */
-function _cmaSet_() {
+function _cmaSet_(ss) {
   var set = {};
-  var rows = _tabRows_(CFG.TAB.CMA_ACCOUNTS);
+  var rows = _tabRows_(CFG.TAB.CMA_ACCOUNTS, ss);
   if (!rows.length) return set;
   var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
   var ei = head.indexOf('email');
@@ -138,8 +175,8 @@ function _isActive_(v) {
  *  header name so the raw agents export (with all its stat columns) pastes in as-is. A "Quay 1
  *  Property Specialist" First Name marks a numbered specialist profile (number = Last Name). Logs
  *  and returns empty (fail loud, not silent) if no Email header is found on a populated tab. */
-function _propdataMaps_() {
-  var rows = _tabRows_(CFG.TAB.PROPDATA_ACCOUNTS);
+function _propdataMaps_(ss) {
+  var rows = _tabRows_(CFG.TAB.PROPDATA_ACCOUNTS, ss);
   var maps = { byEmail: {} };
   if (!rows.length) return maps;
   var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
@@ -165,10 +202,13 @@ function _propdataMaps_() {
   return maps;
 }
 
-/** All rows of a tracker tab as a 2D array; [] when the tab is absent/empty. Never throws. */
-function _tabRows_(tabName) {
+/** All rows of a tracker tab as a 2D array; [] when the tab is absent/empty. Never throws.
+ *  Pass a pre-opened Spreadsheet (`ss`) to avoid a fresh SpreadsheetApp.openById per tab -
+ *  programsData_ reads two tabs and would otherwise pay the (slow) open twice. */
+function _tabRows_(tabName, ss) {
   try {
-    var sh = sheet_().getSheetByName(tabName);
+    var book = ss || sheet_();
+    var sh = book.getSheetByName(tabName);
     if (!sh || sh.getLastRow() < 1) return [];
     return sh.getDataRange().getValues();
   } catch (err) {

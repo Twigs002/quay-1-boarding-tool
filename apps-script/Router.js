@@ -77,6 +77,7 @@ function dispatch_(kind, body, ctx) {
   switch (kind) {
     case 'onboard_quay1': return onboardQuay1_(body, ctx);
     case 'onboard_aqua': return onboardAqua_(body, ctx);
+    case 'approve': return _approveDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'status': return readForUi_(ctx);
@@ -86,16 +87,29 @@ function dispatch_(kind, body, ctx) {
   }
 }
 
-/** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. */
-function _provisionDispatch_(body, ctx) {
-  requireAdmin_(ctx);  // standalone re-provision is admin-only (inline onboard provisioning is gated by requireOnboarder_)
+/** Approve & set up (kind:'approve'). The ONLY path that turns a reviewed candidate into real accounts,
+ *  on a deliberate admin click. Asserts admin here; the ready/idempotency checks live in the handler. */
+function _approveDispatch_(body, ctx) {
+  requireAdmin_(ctx);
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
+  return approveAndProvision_(folderId, ctx);
+}
+
+/** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded
+ *  by the SAME approval gate as everything else - a row must be Approved before any (re)provision. */
+function _provisionDispatch_(body, ctx) {
+  requireAdmin_(ctx);  // standalone re-provision is admin-only
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  if (!o.approved_at) return { ok: false, error: 'not approved: an admin must Approve & set up this candidate before (re)provisioning' };
   var systems = _provisionList_(body, body);
   if (!systems) {
-    var o = readOnboardingByFolder_(folderId);
-    if (!o) return { ok: false, error: 'onboarding row not found' };
-    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team);
+    // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
+    // the entitlements matrix on a standalone re-provision (the code isn't a separate row column).
+    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
   }
   return provisionAll_(folderId, systems, ctx);
 }

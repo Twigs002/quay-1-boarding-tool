@@ -155,20 +155,41 @@ function readForUi_(ctx) {
   var pq = readQueue_(CFG.TAB.PROVISION_QUEUE);
   var oq = readQueue_(CFG.TAB.OFFBOARD_QUEUE);
   var isAdmin = ctx && ctx.role && (ctx.role.is_super || ctx.role.is_admin);
-  if (!isAdmin && ctx && ctx.email) {
+  var email = ctx && ctx.email ? String(ctx.email).toLowerCase() : '';
+  // The candidate pipeline: onboarded people not yet set up, so admins can review + Approve & set up.
+  // Scoped to a broker's own candidates for non-admins.
+  var onboarding = _onboardingPipeline_(isAdmin, email);
+  if (!isAdmin && email) {
     var mine = {};
-    listOnboarding_(function (o) {
-      if (String(o.requester_email).toLowerCase() === String(ctx.email).toLowerCase()) {
-        mine[o.folderId] = true; return true;
-      }
-      return false;
-    });
+    onboarding.forEach(function (o) { mine[o.folderId] = true; });
     pq = pq.filter(function (r) { return mine[r.folderId]; });
     oq = []; // offboarding is admin-only visibility
   }
   // `rows` is the alias the status UI reads (TEST-REPORT drift 4); provisioning/offboarding are
-  // kept as explicit keys for any caller that wants them split.
-  return { ok: true, rows: pq, provisioning: pq, offboarding: oq };
+  // kept as explicit keys for any caller that wants them split. `onboarding` drives the approval UI.
+  return { ok: true, rows: pq, provisioning: pq, offboarding: oq, onboarding: onboarding };
+}
+
+/**
+ * The actionable onboarding pipeline for the status screen: every onboarded person not yet provisioned,
+ * with their document + approval state so the UI can show a "Waiting on docs" / "Ready to approve" /
+ * "Approve & set up" affordance. Non-admins see only candidates they onboarded. Provisioned rows drop
+ * off (their created systems already show in the Provisioning Queue list).
+ */
+function _onboardingPipeline_(isAdmin, email) {
+  var out = [];
+  listOnboarding_().forEach(function (o) {
+    if (o.provisioned_at) return;
+    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    out.push({
+      folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
+      status: o.status || '',
+      docs: { contract: !!o.fica_contract, id: !!o.fica_id, poa: !!o.fica_poa, bank: !!o.fica_bank },
+      docs_ready: _docsReady_(o),
+      approved: !!o.approved_at, approved_at: o.approved_at || '', approved_by: o.approved_by || '',
+    });
+  });
+  return out;
 }
 
 /** Set K/L/N on the Provisioning Queue row matching queue_id. */

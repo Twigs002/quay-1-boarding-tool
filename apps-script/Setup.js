@@ -36,6 +36,7 @@ function setupHub() {
   ensureQueueTabs_(ss);
   ensureTeamDirectoryTab_(ss); // B.3 team -> groups/division/systems map (seed via setupTeamDirectory)
   ensureAccountsTabs_(ss);     // Programs page rosters: CMA Accounts + PropData Accounts tabs
+  ensureCredentialsTab_(ss);   // superuser-readable Google account + temp-password ledger
   _seedFlagDefaults_();
   var msg = 'setupHub complete. Tracker: ' + ss.getId() + '. Tabs: ' +
     ss.getSheets().map(function (s) { return s.getName(); }).join(', ') + '.';
@@ -48,13 +49,18 @@ function setupHub() {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_') ScriptApp.deleteTrigger(t);
+    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
   ScriptApp.newTrigger('reapOffboarding_').timeBased()
     .everyMinutes(15).create();
-  return 'Triggers installed: Tuesday induction digest (~07:00) + offboarding reaper (every 15 min).';
+  // Deferred provisioning: create accounts once a week for everyone whose signed contract + FICA are
+  // in. Wednesday ~08:00 (Africa/Johannesburg per appsscript.json timeZone).
+  ScriptApp.newTrigger('provisionReadyBatch_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.WEDNESDAY).atHour(8).create();
+  return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
+    'provisioning batch (Wednesday ~08:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */
@@ -154,6 +160,194 @@ function setGroupsJson(jsonString) {
 }
 
 function setDriveTransferTo(email) { _reqArg_(email, 'email'); _setProp_(PROP.DRIVE_TRANSFER_TO, email); return 'DRIVE_TRANSFER_TO set.'; }
+
+/**
+ * READ-ONLY live check that Google Workspace provisioning WILL work - the one thing Blocker B0
+ * could not verify at build time. Mutates NOTHING (no user is created or changed): it only reads
+ * the directory to confirm, in order, that
+ *   1. the AdminDirectory advanced service is wired in and callable,
+ *   2. the deploying account's own directory record is readable (Users.get),
+ *   3. that account is a Workspace super-admin (isAdmin) - REQUIRED for Users.insert to succeed,
+ *   4. domain-wide user read works (Users.list) - proves the admin.directory.user scope,
+ *   5. group read works (Groups.list) - the read half of the offboard teardown.
+ * Run this from the Apps Script editor once, after authorising the scopes. A clean pass means the
+ * only thing standing between googleCreate_ and real accounts is flipping DRY_RUN off. Any failure
+ * is returned verbatim so the exact gap (scope not granted / not a super-admin) is obvious.
+ */
+function verifyGoogleLive(adminEmail) {
+  var out = { ok: true, checks: [], as: '', dry_run: DRY_RUN_() };
+  var note = function (name, ok, detail) {
+    out.checks.push({ check: name, ok: ok, detail: detail });
+    if (!ok) out.ok = false;
+  };
+
+  if (typeof AdminDirectory === 'undefined') {
+    note('advanced_service', false, 'AdminDirectory is undefined - enable it in appsscript.json + the Cloud project Admin SDK.');
+    Logger.log(JSON.stringify(out, null, 2));
+    return out;
+  }
+  note('advanced_service', true, 'AdminDirectory advanced service is available.');
+
+  // Session.getEffectiveUser().getEmail() is '' when the web app is hit anonymously, so fall back
+  // to the known deploying admin (adminEmail arg, else pagan@DOMAIN). We look this account's record
+  // up ONLY to read its isAdmin flag - the account whose OAuth token the inserts will run under.
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
+  var checkEmail = me || String(adminEmail || '') || ('pagan@' + CFG.DOMAIN);
+  out.as = me || ('(anonymous; checking ' + checkEmail + ')');
+
+  var meRec = null;
+  try {
+    meRec = AdminDirectory.Users.get(checkEmail);
+    note('users_get_admin', true, 'Read directory record for ' + checkEmail + '.');
+  } catch (e) {
+    note('users_get_admin', false, 'Users.get(' + checkEmail + ') failed: ' + String(e));
+  }
+
+  if (meRec) {
+    var isAdmin = meRec.isAdmin === true || meRec.isDelegatedAdmin === true;
+    note('super_admin', isAdmin,
+      isAdmin ? checkEmail + ' is a Workspace admin - Users.insert will be authorised.'
+              : checkEmail + ' is NOT a Workspace admin - Users.insert will be denied. Grant super-admin or redeploy as one.');
+  }
+
+  try {
+    var list = AdminDirectory.Users.list({ customer: 'my_customer', maxResults: 1 });
+    var n = (list && list.users) ? list.users.length : 0;
+    note('users_list', true, 'Domain user read works (sample size ' + n + ').');
+  } catch (e) {
+    note('users_list', false, 'Users.list failed: ' + String(e));
+  }
+
+  try {
+    AdminDirectory.Groups.list({ customer: 'my_customer', maxResults: 1 });
+    note('groups_list', true, 'Group read works (offboard teardown read half).');
+  } catch (e) {
+    note('groups_list', false, 'Groups.list failed: ' + String(e));
+  }
+
+  out.verdict = out.ok
+    ? 'PASS - Google provisioning is live-ready. Remaining step is the arming decision (DRY_RUN=0).'
+    : 'FAIL - see the failing check(s) above; fix before arming Google.';
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+/**
+ * LIVE WRITE smoke test for Google provisioning. EDITOR-ONLY (not reachable from the web app) and
+ * REFUSES unless Google is already armed (DRY_RUN=0) - so it never bypasses the safety flag, it just
+ * proves the armed path on one disposable account before you trust it on real brokers. It creates
+ * ONE clearly-marked throwaway account via the REAL googleCreate_, verifies it landed with a
+ * credentials-ledger row, suspends it, then DELETES it and removes the ledger row - all in a
+ * try/finally so nothing lingers. Run it from the Apps Script editor once, right after arming.
+ *
+ * Group ADD is exercised for real (throwaway briefly joins its groups, removed when the account is
+ * deleted). Returns a per-step PASS/FAIL report; a clean PASS means real onboarding is safe.
+ */
+function smokeTestGoogleLive(opts) {
+  opts = opts || {};
+  if (DRY_RUN_()) {
+    return { ok: false, refused: true,
+      message: 'Arm Google first (set Script Property DRY_RUN=0), then re-run. This test never bypasses DRY_RUN.' };
+  }
+  var stamp = Utilities.getUuid().slice(0, 8);
+  var person = {
+    folderId: 'SMOKE-' + stamp, full_name: 'Smoke Test ' + stamp,
+    first_name: 'zzsmoke' + stamp, last_name: 'test',
+    team: opts.team || 'Wombats', designation: 'SMOKE TEST', quay_email: '',
+  };
+  var report = { ok: true, steps: [], first_name: person.first_name, team: person.team };
+  var step = function (name, ok, detail) { report.steps.push({ step: name, ok: ok, detail: detail }); if (!ok) report.ok = false; };
+  var email = '';
+  try {
+    var groups = _groupsForTeam_(person.team);
+    step('groups_computed', groups.indexOf(CFG.COMPANY_GROUP) >= 0 && groups.indexOf('wombats@' + CFG.DOMAIN) >= 0,
+      'groups=' + JSON.stringify(groups));
+
+    var created = googleCreate_(person); // real create (DRY_RUN is off - we refused above otherwise)
+    email = created.email || '';
+    step('user_created', !!email && !created.dryRun, 'email=' + email + ' pw=' + created.tempPw);
+
+    var rec = AdminDirectory.Users.get(email);
+    step('user_readback', !!rec && rec.suspended !== true, 'exists; suspended=' + (rec && rec.suspended));
+
+    var cred = _findCredential_(email);
+    step('credential_recorded', !!cred && cred.temp_password === created.tempPw,
+      cred ? 'ledger row present for ' + email : 'ledger row MISSING for ' + email);
+
+    // A just-created user is not immediately mutable ("User creation is not complete"); wait+retry.
+    _withUserReady_(function () { AdminDirectory.Users.update({ suspended: true }, email); });
+    // The suspend is accepted but the read is eventually consistent on a seconds-old account, so
+    // poll the readback until it reflects suspended=true (a race that cannot happen in real
+    // offboarding, where suspend runs long after creation).
+    var confirmed = false;
+    for (var s = 0; s < 6 && !confirmed; s++) {
+      var r2 = AdminDirectory.Users.get(email);
+      confirmed = !!(r2 && r2.suspended === true);
+      if (!confirmed) Utilities.sleep(5000);
+    }
+    step('suspend_confirmed', confirmed, 'suspended=' + confirmed);
+  } catch (e) {
+    step('exception', false, String(e));
+  } finally {
+    if (email) {
+      try { _withUserReady_(function () { AdminDirectory.Users.remove(email); }); step('cleanup_user_deleted', true, 'removed ' + email); }
+      catch (e) { step('cleanup_user_deleted', false, 'DELETE FAILED - run cleanupSmokeAccounts() or remove manually: ' + email + ' :: ' + String(e)); }
+      try { _removeCredential_(email); step('cleanup_ledger_removed', true, 'ledger row removed'); }
+      catch (e2) { step('cleanup_ledger_removed', false, String(e2)); }
+    }
+  }
+  report.verdict = report.ok
+    ? 'PASS - live create + ledger + suspend + cleanup all work. Real onboarding is safe.'
+    : 'FAIL - see failing step(s). Run cleanupSmokeAccounts() to clear any leftover zzsmoke* account.';
+  Logger.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+/** Retry fn while the Google directory reports a just-created user is not yet mutable/visible.
+ *  Google needs a short propagation window after Users.insert before update/delete/suspend work. */
+function _withUserReady_(fn, tries) {
+  tries = tries || 8;
+  var lastErr;
+  for (var i = 0; i < tries; i++) {
+    try { return fn(); }
+    catch (e) {
+      lastErr = e;
+      if (!/not complete|Resource Not Found: userKey/i.test(String(e))) throw e; // a real error, not propagation
+      Utilities.sleep(5000); // wait ~5s and try again (up to ~40s total)
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Delete any leftover throwaway smoke-test accounts (primaryEmail starting 'zzsmoke') and their
+ * ledger rows. Run this if a smokeTestGoogleLive() left an account behind (propagation timeout).
+ * Blast radius is limited to the zzsmoke* test prefix. Returns what it removed.
+ */
+function cleanupSmokeAccounts() {
+  var out = { deleted: [], failed: [] };
+  var resp;
+  try {
+    resp = AdminDirectory.Users.list({ customer: 'my_customer', maxResults: 200, query: 'email:zzsmoke*' });
+  } catch (e) {
+    out.error = 'Users.list failed: ' + String(e);
+    Logger.log(JSON.stringify(out, null, 2));
+    return out;
+  }
+  (resp.users || []).forEach(function (u) {
+    var email = u.primaryEmail;
+    try {
+      _withUserReady_(function () { AdminDirectory.Users.remove(email); });
+      out.deleted.push(email);
+      try { _removeCredential_(email); } catch (e2) { /* ledger row optional */ }
+    } catch (e) {
+      out.failed.push({ email: email, error: String(e) });
+    }
+  });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
 
 /** Print a non-secret summary of what is configured (which keys are set + the flag values). */
 function hubStatus() {

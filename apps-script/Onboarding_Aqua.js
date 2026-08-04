@@ -36,23 +36,23 @@ function onboardAqua_(body, ctx) {
   var requesterEmail = (ctx && ctx.email) || '';
   var requesterName = (ctx && ctx.name) || '';
 
+  // Deferred provisioning (see onboardQuay1_): resolve + persist the systems, create nothing now.
+  var systems = resolveSystems_('aqua', f.programs, _provisionList_(body, f), f.team);
+
   upsertOnboardingRow_({
     folderId: folder.getId(), entity: 'aqua', name: name, id_number: id,
     email: f.email || '', contact: f.contact || '', start_date: fmtDate_(f.start_date),
     requester_name: requesterName, requester_email: requesterEmail,
     designation: f.designation || '', agreement_type: _aquaTypeLabel_(f),
     work_hours: _workHours_(f.work_hours), remuneration: fmtRemuneration_(f.remuneration),
-    programs: f.programs || [], status: 'Contract sent',
+    programs: f.programs || [], systems_json: JSON.stringify(systems), status: 'Contract sent',
   });
 
   var emailed = _emailContract_('aqua', f.email, name, folder.getId(), gen.pdfFile);
 
-  var systems = resolveSystems_('aqua', f.programs, _provisionList_(body, f), f.team);
-  var prov = provisionAll_(folder.getId(), systems, ctx);
-
   return {
     ok: true, folderId: folder.getId(), folderUrl: folder.getUrl(), pdfUrl: gen.pdfUrl,
-    emailed: emailed, provisioning: prov.results,
+    emailed: emailed, provisioning_deferred: true, systems: systems,
   };
 }
 

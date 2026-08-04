@@ -63,6 +63,9 @@ var FLAG = {
 var CFG = {
   DOMAIN: 'quay1.co.za',
 
+  // Company-wide Google group EVERY onboarded broker is added to (on top of their team group).
+  COMPANY_GROUP: 'champions@quay1.co.za',
+
   ENTITIES: ['quay1', 'aqua'],
 
   // Per-entity company info used by the contract + email builders.
@@ -96,6 +99,10 @@ var CFG = {
     // numbered specialist profile, its number = Last Name).
     CMA_ACCOUNTS: 'CMA Accounts',
     PROPDATA_ACCOUNTS: 'PropData Accounts',
+    // Superuser-readable ledger of every Google account created + its temp password. Lives in the
+    // PRIVATE tracker (only admins/superusers can open it), so sheet sharing IS the access control.
+    // Written by recordCredential_ on a live googleCreate_; upsert by quay_email (no duplicates).
+    CREDENTIALS: 'Google Credentials',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
   DIVISIONS_URL: 'https://twigs002.github.io/quay-1-boarding-tool/data/divisions.json',
@@ -107,6 +114,10 @@ var CFG = {
   ACTIONS: ['create', 'deactivate'],
   QUEUE_STATUS: ['pending', 'in_progress', 'done', 'error', 'skipped'],
   OFFB_STATUS: ['scheduled', 'firing', 'done', 'error'],
+  // FFC (Fidelity Fund Certificate) status the candidate self-declares on the FICA page. 'full' (a
+  // valid FFC holder) -> a full PropData agent profile (photo+name+phone+email); 'candidate' (working
+  // towards it) and 'none' -> a numbered PropData specialist profile. See propdataProfileType_.
+  FFC_STATUSES: ['full', 'candidate', 'none'],
 
   // Systems provisioned by DEFAULT for a new hire per entity (RESEARCH 1.4 flags the program
   // -> system mapping as the architect's call; this is that decision). Property24 auto-links on
@@ -118,6 +129,17 @@ var CFG = {
   // Broker-facing program toggle -> lifecycle SYSTEM (RESEARCH 1.4). Only these two overlap the
   // SYSTEMS enum; whatsapp / training / other are informational and enqueue no provisioning row.
   PROGRAM_SYSTEM: { cma: 'cma', dialfire: 'dialfire' },
+
+  // ENTITLEMENTS MATRIX (contract-type -> systems). Keyed by broker ROLE read off the broker-activity
+  // value: 'sb' = full Broker, 'jb' = Assistant. Each entry lists the systems that role must NOT be
+  // provisioned - a filter applied to the resolved CREATE set, even if an operator explicitly ticks
+  // a barred system. Assistants (JB) work under a senior broker's listings/CMA, so they are barred
+  // from Property24 + CMA; full brokers (SB) get everything. Google is never barred. Revoke is
+  // offboarding-only (no mid-life reconcile) - this gates CREATE. A role not listed bars nothing.
+  ENTITLEMENTS_BARRED: {
+    sb: [],
+    jb: ['property24', 'cma'],
+  },
 
   // Broker Activities - the residential clause definitions from the Quay 1 Broker Agreement
   // template ("delete inapplicable definition" table; the chosen one is kept). Ported verbatim
