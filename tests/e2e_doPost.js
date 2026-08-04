@@ -74,7 +74,8 @@ check(/unknown action/.test(post({ kind: 'bogus', accessToken: 'jwt' }).error ||
 
 console.log('6. broker role: onboarding provisions (no admin gate INSIDE provisionAll_), offboard + standalone provision stay admin-only');
 // A separate gas instance whose caller is a pure broker (not super/admin).
-const BROKER = { id: 'u2', email: 'broker@quay1.co.za', name: 'Bree Broker', is_admin: false, is_super: false, is_broker: true, active: true };
+// Onboarders are SENIOR brokers now (is_senior_broker), reconciled with the frontend gate.
+const BROKER = { id: 'u2', email: 'broker@quay1.co.za', name: 'Bree Broker', is_admin: false, is_super: false, is_senior_broker: true, active: true };
 const brokerGas = loadGas({ props: DEFAULT_PROPS, dryRun: true, authUser: BROKER });
 brokerGas.getSheet('Provisioning Queue'); brokerGas.getSheet('Offboarding Queue'); brokerGas.getSheet('Onboarding');
 const bpost = (body) => JSON.parse(brokerGas.ctx.doPost({ postData: { contents: JSON.stringify(body) } }).getContent());

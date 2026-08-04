@@ -206,11 +206,119 @@ function main() {
   }
   if (typeof ctx.googleCreate_ === 'function') {
     calls.adminDirectory.length = 0; calls.urlFetch.length = 0;
-    ctx.googleCreate_({ full_name: 'Jane Doe', first_name: 'Jane', quay_email: '' });
+    const gc = ctx.googleCreate_({ full_name: 'Jane Doe', first_name: 'Jane', quay_email: '', team: 'Wombats' });
     check(calls.adminDirectory.length === 0 && calls.urlFetch.length === 0,
       'DRY_RUN suppresses AdminDirectory + UrlFetch in googleCreate_');
+    const grps = (gc && gc.would && gc.would.groups) || [];
+    check(grps.indexOf('champions@quay1.co.za') >= 0,
+      'onboarding adds every broker to the company-wide champions@ group');
+    check(grps.indexOf('wombats@quay1.co.za') >= 0,
+      "onboarding adds broker to their team group (Wombats -> wombats@quay1.co.za)");
+    check(gc && gc.email === 'jane@quay1.co.za',
+      'account email is firstname@quay1.co.za (fallback firstname.lastname@ on clash)');
+    check(gc && gc.tempPw && gc.tempPw.length >= 12 && gc.tempPw !== 'GJane@002' &&
+          /[A-Z]/.test(gc.tempPw) && /[a-z]/.test(gc.tempPw) && /[0-9]/.test(gc.tempPw),
+      'temp password is random + strong, not derived from the name (security fix)');
   } else {
     blocked('DRY_RUN suppression (googleCreate_/propdataCreate_)', 'Provisioning.* not defined (stub)');
+  }
+  if (typeof ctx.recordCredential_ === 'function') {
+    ctx.recordCredential_({ full_name: 'Sheldon Keyser', quay_email: 'sheldon@quay1.co.za', temp_password: 'GSheldon@002', team: 'Wombats' });
+    ctx.recordCredential_({ full_name: 'Sheldon Keyser', quay_email: 'sheldon@quay1.co.za', temp_password: 'GSheldon@002', team: 'Wombats' });
+    const cred = getSheet('Google Credentials');
+    const dataRows = cred._rows.slice(1); // drop header
+    const mine = dataRows.filter((r) => String(r[2]).toLowerCase() === 'sheldon@quay1.co.za');
+    check(mine.length === 1, 'credential ledger upserts by quay_email (no duplicate on re-provision)');
+    check(mine[0] && mine[0][3] === 'GSheldon@002',
+      'credential ledger stores the temp password superusers can read (col temp_password)');
+  } else {
+    blocked('credential ledger (recordCredential_)', 'Provisioning.recordCredential_ not defined (stub)');
+  }
+  if (typeof ctx.resolveSystems_ === 'function') {
+    // A full Broker (SB) keeps Property24; an Assistant (JB) is stripped of Property24 + CMA even
+    // when explicitly ticked. Team '' so team-mapping does not add systems in the test.
+    const sb = ctx.resolveSystems_('quay1', [], ['google', 'property24', 'cma'], '', 'sell_res_sb');
+    check(sb.indexOf('property24') >= 0 && sb.indexOf('cma') >= 0,
+      'entitlements: full Broker (SB) keeps Property24 + CMA');
+    const jb = ctx.resolveSystems_('quay1', [], ['google', 'property24', 'cma'], '', 'sell_res_jb');
+    check(jb.indexOf('property24') < 0 && jb.indexOf('cma') < 0 && jb.indexOf('google') >= 0,
+      'entitlements: Assistant (JB) barred from Property24 + CMA, keeps Google');
+    // The matrix reads the label form too (standalone re-provision passes o.designation).
+    const jbLabel = ctx.resolveSystems_('quay1', [], ['property24'], '', 'Sell · Residential · Assistant (JB)');
+    check(jbLabel.indexOf('property24') < 0, 'entitlements: JB detected from the label form "(JB)"');
+    // No activity -> nothing barred (defensive default).
+    const none = ctx.resolveSystems_('quay1', [], ['property24', 'cma'], '', '');
+    check(none.indexOf('property24') >= 0 && none.indexOf('cma') >= 0,
+      'entitlements: unknown role bars nothing (default-allow)');
+  } else {
+    blocked('entitlements matrix (resolveSystems_)', 'Provisioning.resolveSystems_ not defined (stub)');
+  }
+  if (typeof ctx.propdataProfileType_ === 'function' && typeof ctx._propdataRole_ === 'function') {
+    check(ctx.propdataProfileType_('full') === 'agent', 'FFC full -> PropData agent profile');
+    check(ctx.propdataProfileType_('candidate') === 'specialist', 'FFC candidate -> PropData specialist profile');
+    check(ctx.propdataProfileType_('none') === 'specialist', 'FFC none -> PropData specialist profile');
+    check(ctx._propdataRole_({ propdata_profile_type: 'specialist' }) === 'specialist',
+      'PropData role uses the persisted profile type');
+    check(ctx._propdataRole_({ ffc_status: 'full' }) === 'agent',
+      'PropData role derives from ffc_status when profile type absent');
+    check(ctx._propdataRole_({}) === 'specialist',
+      'PropData role defaults to specialist (conservative) when FFC not yet captured');
+  } else {
+    blocked('FFC -> PropData profile derivation', 'propdataProfileType_/_propdataRole_ not defined (stub)');
+  }
+  if (typeof ctx.ficaUpload_ === 'function' && typeof ctx.upsertOnboardingRow_ === 'function') {
+    ctx.upsertOnboardingRow_({ folderId: 'FFC-1', name: 'Fee Fee' });
+    const rej = ctx.ficaUpload_({ folderId: 'FFC-1' });
+    check(rej && rej.ok === false && /FFC/i.test(rej.error || ''),
+      'FICA rejects a submission with no FFC status selected');
+    const rejNum = ctx.ficaUpload_({ folderId: 'FFC-1', ffc_status: 'full' });
+    check(rejNum && rejNum.ok === false && /FFC number/i.test(rejNum.error || ''),
+      'FICA requires an FFC number for full/candidate status');
+  } else {
+    blocked('FICA FFC validation (ficaUpload_)', 'ficaUpload_/upsertOnboardingRow_ not defined (stub)');
+  }
+  if (typeof ctx.provisionReadyBatch_ === 'function' && typeof ctx._provisionReady_ === 'function' && typeof ctx._docsReady_ === 'function') {
+    // Docs-in vs the FULL provision gate (docs-in AND a human "Approve & set up").
+    check(ctx._docsReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x' }) === true,
+      'docs-ready true when signed contract + ID + POA + bank all present');
+    check(ctx._provisionReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x' }) === false,
+      'provision gate FALSE with all docs in but NOT approved (the human gate)');
+    check(ctx._provisionReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x', approved_at: '2026-01-01' }) === true,
+      'provision gate TRUE only once docs in AND approved');
+    check(ctx._provisionReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', approved_at: 'x' }) === false,
+      'provision gate false when a required doc (bank) is missing');
+
+    // A docs-in row that has NOT been approved is skipped by the batch (the gate holds).
+    ctx.upsertOnboardingRow_({ folderId: 'UNAPP-1', entity: 'quay1', name: 'Una Approved',
+      fica_contract: 'Received', fica_id: 'Received', fica_poa: 'Received', fica_bank: 'Received' });
+    const resU = ctx.provisionReadyBatch_();
+    check(resU.provisioned.indexOf('UNAPP-1') < 0, 'batch SKIPS a docs-in row that has not been approved');
+
+    // DRY_RUN batch must DEFER an approved row (not mark it done), so the armed run provisions for real.
+    ctx.upsertOnboardingRow_({ folderId: 'DRY-1', entity: 'quay1', name: 'Dry Dan',
+      fica_contract: 'Received', fica_id: 'Received', fica_poa: 'Received', fica_bank: 'Received',
+      approved_at: '2026-01-01', systems_json: JSON.stringify(['google']) });
+    ctx.provisionReadyBatch_();
+    const dry = ctx.readOnboardingByFolder_('DRY-1');
+    check(dry && !dry.provisioned_at, 'DRY_RUN batch does NOT stamp provisioned_at (deferred until armed)');
+
+    // ARMED batch (DRY_RUN off) provisions an approved, docs-in row for real and stamps it.
+    const armed = loadGas({ props: Object.assign({}, DEFAULT_PROPS, { DRY_RUN: '0' }), dryRun: false });
+    armed.getSheet('Provisioning Queue'); armed.getSheet('Onboarding');
+    // Use a browser system (property24 is enqueued for the worker, no Admin SDK) so the stamping
+    // logic is exercised without depending on a live/mocked AdminDirectory.
+    armed.ctx.upsertOnboardingRow_({ folderId: 'RDY-1', entity: 'quay1', name: 'Ready Ray',
+      fica_contract: 'Received', fica_id: 'Received', fica_poa: 'Received', fica_bank: 'Received',
+      approved_at: '2026-01-01', approved_by: 'boss@quay1.co.za', systems_json: JSON.stringify(['property24']) });
+    const res1 = armed.ctx.provisionReadyBatch_();
+    check(res1.provisioned.indexOf('RDY-1') >= 0, 'ARMED batch provisions an approved + docs-in row');
+    const rdy = armed.ctx.readOnboardingByFolder_('RDY-1');
+    check(rdy && !!rdy.provisioned_at, 'ARMED batch stamps provisioned_at on the provisioned row');
+    check(rdy && rdy.status === 'Provisioned', 'ARMED batch sets status to Provisioned');
+    const res2 = armed.ctx.provisionReadyBatch_();
+    check(res2.provisioned.indexOf('RDY-1') < 0, 'batch re-run is idempotent (already-provisioned row skipped)');
+  } else {
+    blocked('deferred provisioning batch (provisionReadyBatch_)', 'provisionReadyBatch_/_provisionReady_/_docsReady_ not defined (stub)');
   }
   // ---------------------------------------------------------------- F
   console.log('F. Offboarding reaper (stuck-row recovery, every 15 min)');
