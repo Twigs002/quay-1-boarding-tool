@@ -493,3 +493,18 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .offb-summary dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
 .offb-summary dt { color: var(--muted); font-weight: 600; font-size: 12.5px; }
 .offb-summary dd { margin: 0; font-weight: 600; }
+
+/* Progress report - candidate pipeline (approval gate UI) */
+.pipe-subhead { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; }
+.pipe-list { display: flex; flex-direction: column; gap: 10px; }
+.pipe-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--card); flex-wrap: wrap; }
+.pipe-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.pipe-team { font-size: 12.5px; margin-top: 2px; }
+.docs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.doc { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; }
+.doc-on { background: var(--green-tint); color: var(--green); }
+.doc-off { background: var(--card-2); color: var(--muted); }
+.pipe-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.pipe-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pill.s-ready { background: #FBF3DA; color: #8A6D0B; }
+@media (max-width: 560px) { .pipe-side { align-items: stretch; width: 100%; } }

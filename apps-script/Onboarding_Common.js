@@ -90,3 +90,49 @@ function _contractCc_(entity, extraCc) {
   });
   return out.join(',');
 }
+
+/** The generated agreement PDF sits directly in the candidate's folder (FICA uploads go to a
+ *  subfolder), so the first root-level PDF is the contract. null if none / on error. */
+function _folderContractPdf_(folderId) {
+  try {
+    var it = DriveApp.getFolderById(folderId).getFilesByType(MimeType.PDF);
+    return it.hasNext() ? it.next() : null;
+  } catch (e) { return null; }
+}
+
+/**
+ * Send a follow-up reminder to a candidate who has not finished onboarding: re-sends the original
+ * contract welcome email (branded HTML + FICA link) with the agreement PDF re-attached, framed as a
+ * gentle nudge to sign and submit FICA. Admin/onboarder-initiated (never automatic). No internal CC -
+ * a reminder should not re-spam the contracts inbox on every nudge. Returns { ok, sent, to }.
+ */
+function _remindContract_(folderId, ctx) {
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  if (o.provisioned_at) return { ok: false, error: 'this person is already set up - no reminder needed' };
+  if (!isEmail_(o.email)) return { ok: false, error: 'no valid candidate email on file for this person' };
+  var entity = o.entity || 'quay1';
+  var company = CFG.COMPANY[entity] || CFG.COMPANY.quay1;
+  var first = firstName_(o.name);
+  var ficaUrl = ficaLink_(folderId);
+  var pdf = _folderContractPdf_(folderId);
+  var subject = 'Reminder: Your ' + company.name + ' Agreement' + (o.name ? ' - ' + o.name : '');
+  var plain =
+    'Hi ' + first + ',\n\n' +
+    'Just a friendly follow-up on your ' + company.name + ' agreement' +
+    (pdf ? ' (attached again for convenience)' : '') + '. When you have a moment, please sign and ' +
+    'return it, and submit your FICA documents using your personal, secure link:\n' +
+    ficaUrl + '\n\n' +
+    'If you have already taken care of this, thank you - please ignore this note. Reply to this email ' +
+    'if you need any help.\n\nWarm regards,\nThe ' + company.name + ' Team';
+  try {
+    var opts = { name: company.name, htmlBody: agreementEmailHtml_(company, first, ficaUrl) };
+    if (pdf) opts.attachments = [pdf.getAs('application/pdf')];
+    GmailApp.sendEmail(o.email, subject, plain, opts);
+    logAudit_('contract_reminder_sent', { folderId: folderId, to: o.email, by: (ctx && ctx.email) || '' });
+    return { ok: true, sent: true, to: o.email };
+  } catch (err) {
+    logAudit_('contract_reminder_failed', { folderId: folderId, error: String(err) });
+    return { ok: false, error: 'could not send the reminder: ' + String(err && err.message ? err.message : err) };
+  }
+}

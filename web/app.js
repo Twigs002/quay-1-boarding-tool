@@ -23,6 +23,8 @@
   const KINDS = {
     onboardQuay1: 'onboard_quay1',
     onboardAqua: 'onboard_aqua',
+    approve: 'approve',
+    remind: 'remind',
     status: 'status',
     programs: 'programs',
     retry: 'retry',
@@ -133,15 +135,29 @@
   // POST text/plain so no CORS preflight fires. Body is { kind, accessToken,
   // ...fields } (docs/CONTRACTS.md section 7): the Supabase JWT rides as
   // `accessToken` and the payload fields sit at the top level alongside kind.
+  const API_TIMEOUT_MS = 35000;  // a wedged Apps Script POST must surface as an error, never an eternal spinner
+
   async function api(kind, data) {
     if (!ENDPOINT) throw new Error('LIFECYCLE_ENDPOINT not set in config.js');
     const accessToken = await window.AUTH.getAccessToken();
     if (!accessToken) throw new Error('Session expired, sign in again.');
-    const res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(Object.assign({ kind, accessToken }, data || {})),
-    });
+    // AbortController gives every call a hard ceiling: if the backend stalls, the fetch rejects
+    // (caught by callers) instead of hanging forever and freezing the view on a spinner.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ kind, accessToken }, data || {})),
+        signal: ctrl.signal,
+      });
+    } catch (err) {
+      throw new Error(err && err.name === 'AbortError' ? 'The server took too long to respond. Please try again.' : 'Could not reach the server. Check your connection and try again.');
+    } finally {
+      clearTimeout(timer);
+    }
     let json;
     try { json = await res.json(); } catch (_) { throw new Error('Bad response from server.'); }
     if (!res.ok || json.ok === false) throw new Error(json && json.error ? json.error : 'Request failed.');
@@ -186,7 +202,7 @@
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Onboard a new person</h2>
-        <p>Generate the contract and record the systems to provision. Accounts are created in the weekly Wednesday 08:00 batch, once the signed contract and FICA documents are in. Choose the entity, then complete the details. Fields marked with a red asterisk are required.</p>
+        <p>Generate the contract and record the systems to provision. The candidate is emailed their agreement and a secure FICA link. No accounts are created here: once their signed contract and FICA documents are in, you review and approve them on the Progress report, and accounts are set up then. Fields marked with a red asterisk are required.</p>
       </div>
       <div class="card card-pad stack">
         <div class="seg" role="tablist" aria-label="Entity">
@@ -367,14 +383,39 @@
     return out;
   }
 
+  // Format checks beyond "not empty", keyed by field name. Return an error string, or '' if fine.
+  // Only applied to a field once it has a value (emptiness is handled by the required check).
+  function fieldFormatError(name, value) {
+    const v = value.trim();
+    if (!v) return '';
+    if (name === 'candidate_email' || name === 'email' || name === 'senior_email') {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email address.';
+    }
+    if (name === 'id_number') {
+      // All-digits is treated as a SA ID (must be 13); anything with letters is a passport - accept.
+      return /^\d+$/.test(v) ? (v.length === 13 ? '' : 'A South African ID is 13 digits.') : '';
+    }
+    if (name === 'commission') {
+      return /^\d{1,3}(\.\d+)?$/.test(v) && Number(v) <= 100 ? '' : 'Enter a number between 0 and 100.';
+    }
+    return '';
+  }
+
   function validateOnboard(form) {
     let firstBad = null;
-    form.querySelectorAll('[aria-required="true"]').forEach((i) => {
+    const mark = (i, msg) => {
       const errEl = $('#e_' + i.name, form);
-      const bad = !i.value.trim();
-      i.setAttribute('aria-invalid', bad ? 'true' : 'false');
-      if (errEl) errEl.textContent = bad ? 'Required.' : '';
-      if (bad && !firstBad) firstBad = i;
+      i.setAttribute('aria-invalid', msg ? 'true' : 'false');
+      if (errEl) errEl.textContent = msg || '';
+      if (msg && !firstBad) firstBad = i;
+    };
+    form.querySelectorAll('[aria-required="true"]').forEach((i) => {
+      mark(i, !i.value.trim() ? 'Required.' : fieldFormatError(i.name, i.value));
+    });
+    // Optional fields still get a format check when filled (e.g. senior email).
+    form.querySelectorAll('input:not([aria-required="true"])').forEach((i) => {
+      const msg = fieldFormatError(i.name, i.value || '');
+      if (msg) mark(i, msg);
     });
     if (firstBad) firstBad.focus();
     return !firstBad;
@@ -394,7 +435,11 @@
     try {
       const kind = entity === 'aqua' ? KINDS.onboardAqua : KINDS.onboardQuay1;
       const r = await api(kind, data);
-      toast('Onboarding submitted', `Contract sent to ${data.name}. Accounts are created in the Wednesday 08:00 batch once their signed contract + FICA docs are in (${data.systems.length} system(s) queued).`, 'ok');
+      if (r && r.emailed === false) {
+        toast('Onboarded, but the email did not send', `${data.name}'s record and contract are ready, but the welcome email failed to send. Use "Send reminder" on the Progress report to try again, or contact them directly.`, 'err');
+      } else {
+        toast('Onboarding submitted', `${data.name} has been emailed their agreement and a secure FICA link. Once their signed contract + FICA docs are in, review and approve them on the Progress report to set up accounts.`, 'ok');
+      }
       form.reset();
       // Restore check defaults: core systems on, optional systems off.
       form.querySelectorAll('.check input').forEach((i) => {
@@ -506,8 +551,8 @@
   function viewProvisioning(root) {
     const wrap = el(`<div class="stack">
       <div class="section-head">
-        <h2>Provisioning status</h2>
-        <p>Live view of the account-provisioning queue: one row per person and system. Google and PropData run inside Apps Script; Property24, CMA and Dialfire run on the worker.</p>
+        <h2>Progress report</h2>
+        <p>Where every new hire stands: who you are waiting on for documents, who is ready for you to review and approve, and the account setup once approved. Nothing is created until you approve.</p>
       </div>
       <div class="card card-pad">
         <div class="toolbar">
@@ -516,6 +561,7 @@
             <button type="button" class="btn btn-ghost btn-sm" id="provRefresh">Refresh</button>
           </div>
         </div>
+        <div id="pipeBody"></div>
         <div id="provBody"></div>
       </div>
     </div>`);
@@ -534,30 +580,109 @@
   };
 
   async function loadStatus(wrap, force) {
-    const body = $('#provBody', wrap), meta = $('#provMeta', wrap);
-    body.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>`;
+    const pipe = $('#pipeBody', wrap), body = $('#provBody', wrap), meta = $('#provMeta', wrap);
+    pipe.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div>`;
+    body.innerHTML = '';
     meta.textContent = 'Loading...';
-    try {
-      const r = (statusCache.length && !force) ? { rows: statusCache } : await api(KINDS.status, {});
-      // CONTRACTS 8.3: provisioning rows live under `rows`; `offboarding` is
-      // separate admin-only context we don't render here.
-      const rows = (r.rows || r.data || []).slice();
-      statusCache = rows;
-      renderStatus(body, meta, rows);
-    } catch (err) {
-      meta.textContent = '';
-      body.innerHTML = `<div class="state"><div class="state-title">Could not load the queue</div><div>${esc(err.message)}</div></div>`;
+    let r = null, lastErr = null;
+    // A cold /exec can return non-JSON ("Bad response") on the first hit; retry only that case.
+    // A timeout or auth error is real - surface it immediately rather than retrying for ~100s.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { r = await api(KINDS.status, {}); lastErr = null; break; }
+      catch (err) { lastErr = err; if (!/Bad response/.test(err.message)) break; }
     }
+    if (lastErr) {
+      meta.textContent = '';
+      pipe.innerHTML = `<div class="state"><div class="state-title">Could not load the progress report</div><div>${esc(lastErr.message)}</div></div>`;
+      return;
+    }
+    const rows = (r.rows || r.data || []).slice();       // provisioning queue (created systems)
+    const pipeline = (r.onboarding || []).slice();       // candidates not yet set up
+    statusCache = rows;
+    renderPipeline(pipe, meta, pipeline, wrap);
+    renderStatus(body, null, rows);
+  }
+
+  // The candidate pipeline: who is waiting on docs, who is ready to approve, who is being set up.
+  function renderPipeline(host, meta, items, wrap) {
+    const awaiting = items.filter((o) => o.docs_ready && !o.approved).length;
+    if (meta) meta.textContent = items.length
+      ? `${items.length} in progress${awaiting ? ` · ${awaiting} ready to approve` : ''}` : '';
+    if (!items.length) {
+      host.innerHTML = `<div class="state"><div class="state-title">No one in progress</div><div>New hires appear here after onboarding, and stay until their accounts are set up.</div></div>`;
+      return;
+    }
+    const docPill = (on, label) => `<span class="doc ${on ? 'doc-on' : 'doc-off'}">${on ? '✓' : '○'} ${label}</span>`;
+    const cards = items.map((o) => {
+      const ent = (o.entity || '').toLowerCase();
+      const entTag = ent === 'aqua' ? '<span class="entity-tag aqua">Aqua</span>' : '<span class="entity-tag quay1">Quay 1</span>';
+      const state = o.approved ? { c: 's-done', t: 'Approved · setting up' }
+        : o.docs_ready ? { c: 's-ready', t: 'Ready to approve' }
+        : { c: 's-pending', t: 'Waiting on documents' };
+      const docs = `<div class="docs">
+        ${docPill(o.docs && o.docs.contract, 'Contract')}${docPill(o.docs && o.docs.id, 'ID')}
+        ${docPill(o.docs && o.docs.poa, 'Address')}${docPill(o.docs && o.docs.bank, 'Bank')}</div>`;
+      const approveBtn = (o.docs_ready && !o.approved)
+        ? `<button type="button" class="btn btn-primary btn-sm" data-approve="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Approve &amp; set up</button>` : '';
+      const remindBtn = !o.approved
+        ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Send reminder</button>` : '';
+      return `<div class="pipe-row">
+        <div class="pipe-main">
+          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
+          <div class="pipe-team muted">${esc(o.team || '')}</div>
+          ${docs}
+        </div>
+        <div class="pipe-side">
+          <span class="pill ${state.c}">${state.t}</span>
+          <div class="pipe-actions">${approveBtn}${remindBtn}</div>
+        </div>
+      </div>`;
+    }).join('');
+    host.innerHTML = `<div class="pipe-list">${cards}</div>`;
+    wirePipeline(host, wrap);
+  }
+
+  function wirePipeline(host, wrap) {
+    host.querySelectorAll('[data-approve]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const name = b.dataset.name || 'this person';
+        if (!confirm(`Approve ${name} and set up their accounts now? This creates their logins across all systems.`)) return;
+        b.classList.add('loading'); b.disabled = true;
+        try {
+          await api(KINDS.approve, { folderId: b.dataset.approve });
+          toast('Approved', `${name}'s accounts are being set up now.`, 'ok');
+          statusCache = []; loadStatus(wrap, true);
+        } catch (err) {
+          toast('Could not approve', err.message, 'err');
+          b.classList.remove('loading'); b.disabled = false;
+        }
+      });
+    });
+    host.querySelectorAll('[data-remind]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const name = b.dataset.name || 'this person';
+        b.classList.add('loading'); b.disabled = true;
+        try {
+          const r = await api(KINDS.remind, { folderId: b.dataset.remind });
+          toast('Reminder sent', `A follow-up with the contract was sent to ${esc(r.to || name)}.`, 'ok');
+          b.classList.remove('loading'); b.disabled = false;
+        } catch (err) {
+          toast('Could not send reminder', err.message, 'err');
+          b.classList.remove('loading'); b.disabled = false;
+        }
+      });
+    });
   }
 
   function renderStatus(body, meta, rows) {
     if (!rows.length) {
-      meta.textContent = '';
-      body.innerHTML = `<div class="state"><div class="state-title">Nothing in the queue</div><div>Provisioning rows appear here once an onboarding request is submitted.</div></div>`;
+      if (meta) meta.textContent = '';
+      body.innerHTML = '';   // the pipeline above already shows in-progress candidates
       return;
     }
     const canRetry = USER && USER.isSuper;
-    meta.textContent = `${rows.length} queue row(s)`;
+    if (meta) meta.textContent = `${rows.length} queue row(s)`;
+    const heading = `<div class="pipe-subhead">Account setup</div>`;
     const head = `<thead><tr>
       <th>Person</th><th>Entity</th><th>System</th><th>Action</th><th>Status</th><th>Detail</th>
       ${canRetry ? '<th aria-label="Retry"></th>' : ''}</tr></thead>`;
@@ -583,7 +708,7 @@
         <td class="muted">${esc(detail).slice(0, 80)}</td>
         ${retryCell}</tr>`;
     }).join('');
-    body.innerHTML = `<div class="tbl-wrap"><table class="tbl">${head}<tbody>${trs}</tbody></table></div>`;
+    body.innerHTML = heading + `<div class="tbl-wrap"><table class="tbl">${head}<tbody>${trs}</tbody></table></div>`;
 
     if (canRetry) {
       body.querySelectorAll('[data-retry]').forEach((b) => {

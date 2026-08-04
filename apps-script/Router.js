@@ -78,6 +78,7 @@ function dispatch_(kind, body, ctx) {
     case 'onboard_quay1': return onboardQuay1_(body, ctx);
     case 'onboard_aqua': return onboardAqua_(body, ctx);
     case 'approve': return _approveDispatch_(body, ctx);
+    case 'remind': return _remindDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'status': return readForUi_(ctx);
@@ -94,6 +95,15 @@ function _approveDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return approveAndProvision_(folderId, ctx);
+}
+
+/** Send a candidate a reminder to sign + submit FICA (re-sends the contract email). Any onboarder
+ *  (super/admin/senior broker) may nudge; the handler re-sends only to the candidate on file. */
+function _remindDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return _remindContract_(folderId, ctx);
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded
