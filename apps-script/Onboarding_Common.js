@@ -43,7 +43,9 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) {
   var company = CFG.COMPANY[entity] || CFG.COMPANY.quay1;
   var first = firstName_(name);
   var ficaUrl = ficaLink_(folderId);
-  var ccList = _contractCc_(entity, extraCc);
+  // A test onboard (a plus-addressed +test / +qa recipient) never CCs the internal contracts
+  // inbox - it goes only to the test address, so QA runs cannot spam colleagues.
+  var ccList = _isTestRecipient_(toEmail) ? '' : _contractCc_(entity, extraCc);
   var fullName = String(name || '').trim();
   var subject = 'Your ' + company.name + ' Agreement' + (fullName ? ' - ' + fullName : '');
   var plain =
@@ -72,6 +74,12 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) {
     logAudit_('email_contract_failed', { entity: entity, to: toEmail, error: String(err) });
     return false;
   }
+}
+
+/** A QA/test recipient: plus-addressed +test or +qa (e.g. name+test@quay1.co.za). Used to suppress
+ *  the internal CC on test onboards so a QA run never emails real colleagues. */
+function _isTestRecipient_(email) {
+  return /\+(test|qa)\b/i.test(String(email || ''));
 }
 
 /** Build the contract-email CC string for an entity: the fixed CONTRACT_CC[entity] set plus any
