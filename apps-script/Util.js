@@ -103,3 +103,23 @@ function logAudit_(kind, detail) {
       (typeof detail === 'string' ? detail : JSON.stringify(detail)));
   } catch (e) { /* logging must never throw into a handler */ }
 }
+
+// ---------------------------------------------------------------- concurrency lock
+// This is a STANDALONE web app (not container-bound), so LockService.getDocumentLock() returns
+// null and .waitLock() throws. getScriptLock() is the correct one. _LOCK_DEPTH makes the lock
+// reentrant within a single execution: a locked writer (e.g. approveAndProvision_) may call another
+// locked writer (enqueueProvision_) without dead-locking on the same non-reentrant script lock.
+var _LOCK_DEPTH = 0;
+
+/** Acquire the script lock, reentrant-safe + standalone-safe. Mirrors the Lock API (waitLock /
+ *  releaseLock) so call sites read unchanged. A nested acquire in the same execution is a no-op
+ *  that still balances on release; the real lock is taken once at the outermost level. */
+function _acquireLock_() {
+  var reentrant = _LOCK_DEPTH > 0;
+  _LOCK_DEPTH++;
+  var real = reentrant ? null : LockService.getScriptLock();
+  return {
+    waitLock: function (ms) { if (real) real.waitLock(ms); },
+    releaseLock: function () { _LOCK_DEPTH--; if (real) real.releaseLock(); },
+  };
+}

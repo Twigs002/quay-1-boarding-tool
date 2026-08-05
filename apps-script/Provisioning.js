@@ -222,7 +222,7 @@ function provisionReadyBatch_() {
 function approveAndProvision_(folderId, ctx) {
   // Serialise: two concurrent "Approve & set up" clicks must not both provision (double account).
   // The lock also makes the read-check-provision-stamp one critical section.
-  var lock = LockService.getDocumentLock();
+  var lock = _acquireLock_();
   lock.waitLock(30000);
   try {
     var o = readOnboardingByFolder_(folderId);

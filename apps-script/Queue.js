@@ -73,7 +73,7 @@ function _appendTextRow_(t, values) {
  * done/error, WORKER_SYSTEMS pending), result (object|optional). Returns the generated queue_id.
  */
 function enqueueProvision_(pq) {
-  var lock = LockService.getDocumentLock();
+  var lock = _acquireLock_();
   lock.waitLock(20000);
   try {
     var t = _pqTab_();
@@ -110,7 +110,7 @@ function enqueueDeactivate_(email, system, payload) {
   // The dup-guard (check) and the append must be ONE critical section, else two overlapping
   // offboarding fires could both pass the check and double-enqueue (TOCTOU). A script lock
   // serialises them; enqueueProvision_'s own document lock still guards the raw append.
-  var lock = LockService.getScriptLock();
+  var lock = _acquireLock_();
   lock.waitLock(20000);
   try {
     var rows = readQueue_(CFG.TAB.PROVISION_QUEUE);
@@ -245,7 +245,7 @@ function retryRow_(queueId, ctx) {
  * requested_by, requested_at, fire_at, systems (array). Returns the generated offb_id.
  */
 function writeOffboard_(oq) {
-  var lock = LockService.getDocumentLock();
+  var lock = _acquireLock_();
   lock.waitLock(20000);
   try {
     var t = _oqTab_();

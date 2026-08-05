@@ -115,7 +115,7 @@ function findOnboardingRow_(folderId) {
  */
 function upsertOnboardingRow_(data) {
   if (!data || !data.folderId) throw new Error('upsertOnboardingRow_ needs data.folderId');
-  var lock = LockService.getDocumentLock();
+  var lock = _acquireLock_();
   lock.waitLock(20000);
   try {
     var sh = _onbTab_();
