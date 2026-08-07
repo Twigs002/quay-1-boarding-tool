@@ -24,6 +24,9 @@
  *   W programs(JSON)  X induction_wed  Y induction_thu  Z status  AA folderId(hidden key)
  *   AB ffc_status  AC ffc_number  AD propdata_profile_type  AE specialist_ref   (FFC / PropData, appended after the key so column numbers above never shift)
  *   AF systems_json  AG provisioned_at   (deferred provisioning: the systems resolved at onboard, and the batch's done-marker; provisioning no longer runs at onboard - see provisionReadyBatch_)
+ *   AH..  approval + reminder + CMA markers, then the HR Information Sheet fields (nationality,
+ *   birthday, bank/account, tax, address, work permit, next-of-kin) and the HR sync markers. All
+ *   appended after the folderId key so no column number above ever shifts. See Hr.js.
  *
  * Public surface:
  *   ONB_COL / ONB_HEADERS / FICA_COL            - the frozen column map + FICA doc-key->col.
@@ -58,6 +61,28 @@ var ONB_COL = {
   approved_at: 34, approved_by: 35,
   // Last time a "Send reminder" follow-up went out, so the UI can show it + guard against spamming.
   reminded_at: 36,
+  // When the CMA approval-request email was auto-sent to the approvers (on admin acceptance of a
+  // CMA-entitled candidate). Idempotency marker so re-accepting never re-sends. See _maybeRequestCma_.
+  cma_requested_at: 37,
+  // HR Information Sheet fields (appended, no shift). These populate the HR master sheet's automated
+  // tabs (see Hr.js): the contract form supplies nationality (only when the ID is not a 13-digit SA
+  // ID); the candidate supplies the rest on the FICA page. birthday is auto-derived from a 13-digit
+  // SA ID when the candidate leaves it blank. work_permit_* is required only for non-SA candidates.
+  nationality: 38, birthday: 39, bank_name: 40, account_number: 41, account_type: 42,
+  tax_number: 43, residential_address: 44, work_permit_expiry: 45, work_permit_received: 46,
+  nok_name: 47, nok_contact: 48, nok_relationship: 49, nok_email: 50,
+  // HR sync markers (appended, no shift): when the row was last written to the HR "New Starters
+  // (Tracking)" tab, and when it was promoted (copied) to the entity destination tab. hr_promoted_at
+  // is the idempotency marker so a re-run never double-appends a promoted candidate. See Hr.js.
+  hr_tracking_at: 51, hr_promoted_at: 52,
+  // Drive file id of the candidate's FICA headshot (PHOTO upload), captured at FICA time. For a
+  // full-status agent it is passed to the PropData worker, which builds the branded Prop24 photo
+  // (worker/photo_pipeline.py). Empty when no headshot was uploaded. See _browserPayload_.
+  photo_file_id: 53,
+  // When the Dialfire manual account-request email was sent to DIALFIRE_APPROVERS (on admin
+  // acceptance of a Dialfire-entitled starter). Idempotency marker so re-accepting never re-sends.
+  // Mirrors cma_requested_at. See _maybeRequestDialfire_.
+  dialfire_requested_at: 54,
 };
 
 var ONB_HEADERS = [
@@ -68,6 +93,11 @@ var ONB_HEADERS = [
   'Programs', 'Induction Wed', 'Induction Thu', 'Status', 'Folder ID (key)',
   'FFC status', 'FFC number', 'PropData profile', 'Specialist ref',
   'Systems (resolved)', 'Provisioned at', 'Approved at', 'Approved by', 'Reminded at',
+  'CMA requested at',
+  'Nationality', 'Birthday', 'Bank', 'Account number', 'Account type',
+  'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
+  'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
+  'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

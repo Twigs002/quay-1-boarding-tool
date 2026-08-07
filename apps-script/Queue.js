@@ -185,6 +185,10 @@ function _onboardingPipeline_(isAdmin, email) {
   listOnboarding_().forEach(function (o) {
     if (o.provisioned_at) return;
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    var sys = safeJsonParse_(o.systems_json, null);
+    if (!Array.isArray(sys)) {
+      sys = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+    }
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       status: o.status || '',
@@ -192,6 +196,9 @@ function _onboardingPipeline_(isAdmin, email) {
       docs_ready: _docsReady_(o),
       approved: !!o.approved_at, approved_at: o.approved_at || '', approved_by: o.approved_by || '',
       reminded_at: o.reminded_at || '',
+      // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
+      // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
+      cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,
     });
   });
   return out;

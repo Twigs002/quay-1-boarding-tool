@@ -33,6 +33,13 @@ class OtpRequired(Exception):
 _SKIP_REASON = ("CMA OTP/2FA gate is unsolved - cannot complete headlessly "
                 "(see cma-lookup, parked). TODO: solve OTP, then map user-admin DOM.")
 
+# CMA is a PAID seat, so a new starter's CMA account is NOT auto-created. On admin acceptance the
+# Apps Script side emails the CMA approvers (Sheldon + Marthinus) an approval request instead
+# (see _maybeRequestCma_ / CMA_APPROVERS); the seat is set up by hand once approved. The create row
+# is still enqueued but intentionally skips here with this reason.
+_CREATE_SKIP_REASON = ("CMA create is not automated (paid seat): an approval-request email is sent "
+                       "to the CMA approvers on admin acceptance - set the seat up manually once approved.")
+
 
 class CmaProvisioner(Provisioner):
     system = "cma"
@@ -43,8 +50,8 @@ class CmaProvisioner(Provisioner):
     # and never a retriable `error`. The _login/_create_live scaffolding below is
     # the mapped reference flow to build on once OTP is solved.
     def create(self, person: Person) -> dict:
-        log.info("cma.create -> SKIP (email=%r): %s", person.quay_email, _SKIP_REASON)
-        raise Skip(_SKIP_REASON)
+        log.info("cma.create -> SKIP (email=%r): %s", person.quay_email, _CREATE_SKIP_REASON)
+        raise Skip(_CREATE_SKIP_REASON)
 
     def deactivate(self, person: Person) -> dict:
         log.info("cma.deactivate -> SKIP (email=%r): %s", person.quay_email, _SKIP_REASON)

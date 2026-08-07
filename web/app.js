@@ -171,6 +171,11 @@
   const HUB = (window.HUB = window.HUB || {});
   HUB.$ = $; HUB.esc = esc; HUB.el = el; HUB.api = api; HUB.toast = toast;
   HUB.KINDS = KINDS; HUB.OFFBOARD_DELAY_MIN = OFFBOARD_DELAY_MIN;
+  // Shared pipeline-card pieces, so the Progress report (renderPipeline) and the Admin Check tab
+  // (app.admincheck.js) render the same new hire identically and never drift.
+  HUB.docPill = (on, label) => `<span class="doc ${on ? 'doc-on' : 'doc-off'}">${on ? '✓' : '○'} ${label}</span>`;
+  HUB.entTag = (ent) => String(ent || '').toLowerCase() === 'aqua'
+    ? '<span class="entity-tag aqua">Aqua</span>' : '<span class="entity-tag quay1">Quay 1</span>';
   HUB.getUser = () => USER;
   HUB.getStatusCache = () => statusCache;
   HUB.setStatusCache = (v) => { statusCache = v; };
@@ -178,12 +183,17 @@
   //  ROUTER
   const VIEWS = {
     onboard: viewOnboard, provisioning: viewProvisioning, programs: viewPrograms,
-    offboard: (root) => window.HUB.viewOffboard(root),  // defined in app.offboard.js
+    offboard: (root) => window.HUB.viewOffboard(root),      // defined in app.offboard.js
+    admincheck: (root) => window.HUB.viewAdminCheck(root),  // defined in app.admincheck.js
   };
 
+  // Admin Check (accept FICA -> release provisioning + email CMA approvers) is super/admin only.
+  const canAdminCheck = () => !!(USER && (USER.isAdmin || USER.isSuper));
+
   function route(tab) {
-    // Brokers cannot open Offboard; bounce them to Onboard.
+    // Brokers cannot open Offboard or Admin Check; bounce them to Onboard.
     if (tab === 'offboard' && !(USER && USER.canOffboard)) tab = 'onboard';
+    if (tab === 'admincheck' && !canAdminCheck()) tab = 'onboard';
     document.querySelectorAll('.tab-btn').forEach((b) => {
       const on = b.dataset.tab === tab;
       b.classList.toggle('active', on);
@@ -202,7 +212,7 @@
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Onboard a new person</h2>
-        <p>Generate the contract and record the systems to provision. The candidate is emailed their agreement and a secure FICA link. No accounts are created here: once their signed contract and FICA documents are in, you review and approve them on the Progress report, and accounts are set up then. Fields marked with a red asterisk are required.</p>
+        <p>Generate the contract and record the systems to provision. The candidate is emailed their agreement and a secure FICA link. No accounts are created here: once their signed contract and FICA documents are in, an admin accepts them on the Admin Check tab, and accounts are set up then. Fields marked with a red asterisk are required.</p>
       </div>
       <div class="card card-pad stack">
         <div class="seg" role="tablist" aria-label="Entity">
@@ -258,6 +268,12 @@
       const common =
         fieldText('name', 'Full name', { required: true }) +
         fieldText('id_number', 'ID number', { required: true }) +
+        // Nationality is revealed + required only when the ID is not a 13-digit SA ID (i.e. a foreign
+        // passport). For non-SA starters this pairs with a required work-permit upload on the FICA page.
+        `<div class="field" id="nationalityWrap" hidden>
+          <label for="f_nationality">Nationality <span class="req" aria-hidden="true">*</span></label>
+          <input id="f_nationality" name="nationality" type="text" placeholder="e.g. Zimbabwean" autocomplete="off">
+          <span class="field-err" id="e_nationality" aria-live="polite"></span></div>` +
         fieldText('contact', 'Cell number', { required: true, type: 'tel' }) +
         fieldText('email', 'Personal email', { required: true, type: 'email', hint: 'Used to send the contract + induction pack.' }) +
         fieldText('start_date', 'Start date', { required: true, type: 'date' }) +
@@ -367,6 +383,23 @@
         };
         syncEnd(); agr.addEventListener('change', syncEnd);
       }
+      // A non-SA ID (not exactly 13 digits) reveals the required Nationality field; a 13-digit SA ID
+      // hides it. Mirrors the Aqua fixed-term end_date reveal so validation picks it up automatically.
+      const idInput = $('#f_id_number', form);
+      const natWrap = $('#nationalityWrap', form), natInput = $('#f_nationality', form);
+      const syncNat = () => {
+        const foreign = !/^\d{13}$/.test(((idInput && idInput.value) || '').trim());
+        if (natWrap) natWrap.hidden = !foreign;
+        if (natInput) {
+          if (foreign) { natInput.setAttribute('aria-required', 'true'); }
+          else {
+            natInput.removeAttribute('aria-required'); natInput.removeAttribute('aria-invalid');
+            natInput.value = '';   // don't ship a stale "Zimbabwean" for a corrected 13-digit SA ID
+            const e = $('#e_nationality', form); if (e) e.textContent = '';
+          }
+        }
+      };
+      if (idInput) { syncNat(); idInput.addEventListener('input', syncNat); }
     }
 
     form.addEventListener('submit', (e) => { e.preventDefault(); submitOnboard(form, entity); });
@@ -436,7 +469,7 @@
       if (r && r.emailed === false) {
         toast('Onboarded, but the email did not send', `${data.name}'s record and contract are ready, but the welcome email failed to send. Use "Send reminder" on the Progress report to try again, or contact them directly.`, 'err');
       } else {
-        toast('Onboarding submitted', `${data.name} has been emailed their agreement and a secure FICA link. Once their signed contract + FICA docs are in, review and approve them on the Progress report to set up accounts.`, 'ok');
+        toast('Onboarding submitted', `${data.name} has been emailed their agreement and a secure FICA link. Once their signed contract + FICA docs are in, an admin accepts them on the Admin Check tab to set up accounts.`, 'ok');
       }
       form.reset();
       // Restore check defaults: core systems on, optional systems off.
@@ -550,7 +583,7 @@
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Progress report</h2>
-        <p>Where every new hire stands: who you are waiting on for documents, who is ready for you to review and approve, and the account setup once approved. Nothing is created until you approve.</p>
+        <p>Where every new hire stands: who you are waiting on for documents, who is ready for an admin to accept (on the Admin Check tab), and the account setup once accepted. Nothing is created until an admin accepts.</p>
       </div>
       <div class="card card-pad">
         <div class="toolbar">
@@ -622,21 +655,18 @@
       host.innerHTML = `<div class="state"><div class="state-title">No one in progress</div><div>New hires appear here after onboarding, and stay until their accounts are set up.</div></div>`;
       return;
     }
-    // Approve hits requireAdmin_ on the backend, so only offer the button to admins/supers - a senior
-    // broker sees the state and can Send reminder, but never an Approve button that would 403.
-    const canApprove = USER && (USER.isAdmin || USER.isSuper);
-    const docPill = (on, label) => `<span class="doc ${on ? 'doc-on' : 'doc-off'}">${on ? '✓' : '○'} ${label}</span>`;
+    // Accept/approve now lives on the Admin Check tab (super/admin only). The Progress report is
+    // view-only: it shows document + approval state and offers Send reminder, but never an Accept
+    // button (that would 403 for non-admins and duplicate the Admin Check action).
+    const docPill = HUB.docPill;
     const cards = items.map((o) => {
-      const ent = (o.entity || '').toLowerCase();
-      const entTag = ent === 'aqua' ? '<span class="entity-tag aqua">Aqua</span>' : '<span class="entity-tag quay1">Quay 1</span>';
+      const entTag = HUB.entTag(o.entity);
       const state = o.approved ? { c: 's-done', t: 'Approved · setting up' }
         : o.docs_ready ? { c: 's-ready', t: 'Ready to approve' }
         : { c: 's-pending', t: 'Waiting on documents' };
       const docs = `<div class="docs">
         ${docPill(o.docs && o.docs.contract, 'Contract')}${docPill(o.docs && o.docs.id, 'ID')}
         ${docPill(o.docs && o.docs.poa, 'Address')}${docPill(o.docs && o.docs.bank, 'Bank')}</div>`;
-      const approveBtn = (canApprove && o.docs_ready && !o.approved)
-        ? `<button type="button" class="btn btn-primary btn-sm" data-approve="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Approve &amp; set up</button>` : '';
       const remindBtn = !o.approved
         ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-reminded="${esc(o.reminded_at || '')}">Send reminder</button>` : '';
       const remindedNote = o.reminded_at ? `<div class="pipe-reminded">Reminded ${esc(timeAgo(o.reminded_at))}</div>` : '';
@@ -648,7 +678,7 @@
         </div>
         <div class="pipe-side">
           <span class="pill ${state.c}">${state.t}</span>
-          <div class="pipe-actions">${approveBtn}${remindBtn}</div>
+          <div class="pipe-actions">${remindBtn}</div>
           ${remindedNote}
         </div>
       </div>`;
@@ -658,21 +688,6 @@
   }
 
   function wirePipeline(host, wrap) {
-    host.querySelectorAll('[data-approve]').forEach((b) => {
-      b.addEventListener('click', async () => {
-        const name = b.dataset.name || 'this person';
-        if (!confirm(`Approve ${name} and set up their accounts now? This creates their logins across all systems.`)) return;
-        b.classList.add('loading'); b.disabled = true;
-        try {
-          const r = await api(KINDS.approve, { folderId: b.dataset.approve });
-          toast('Approved', (r && r.message) ? r.message : `${name}'s accounts are being set up now.`, 'ok');
-          statusCache = []; loadStatus(wrap, true);
-        } catch (err) {
-          toast('Could not approve', err.message, 'err');
-          b.classList.remove('loading'); b.disabled = false;
-        }
-      });
-    });
     host.querySelectorAll('[data-remind]').forEach((b) => {
       b.addEventListener('click', async () => {
         const name = b.dataset.name || 'this person';
@@ -790,6 +805,11 @@
     if (!(USER && USER.canOffboard)) {
       const offBtn = document.querySelector('.tab-btn[data-tab="offboard"]');
       if (offBtn) offBtn.remove();
+    }
+    // Admin Check (accept FICA) is super/admin only - remove the tab for everyone else.
+    if (!canAdminCheck()) {
+      const acBtn = document.querySelector('.tab-btn[data-tab="admincheck"]');
+      if (acBtn) acBtn.remove();
     }
     document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => route(b.dataset.tab)));
     route('onboard');

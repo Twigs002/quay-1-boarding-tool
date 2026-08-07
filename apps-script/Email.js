@@ -119,6 +119,45 @@ function provisionNoticeHtml_(company, name, fields, systems, folderUrl) {
   return emailShell_(company, 'Account setup needed', inner);
 }
 
+/** CMA access approval-request email (auto-sent to CMA_APPROVERS on admin acceptance of a
+ *  CMA-entitled candidate). CMA costs money, so it needs a human yes before the seat is bought. */
+/** Generic manual-account request email (CMA + Dialfire): a system that is not auto-created, so we
+ *  email whoever creates it with the starter's name + team. `noteTitle`/`noteBody` render an amber
+ *  callout when present (e.g. the CMA cost warning). Branded via emailShell_. */
+function accountRequestHtml_(company, kicker, accountLabel, name, team, noteTitle, noteBody) {
+  var B = CFG.BRAND;
+  var detail = function (label, value) {
+    return '<tr><td style="padding:3px 14px 3px 0;font-size:13px;color:' + B.muted + ';white-space:nowrap">' + htmlEsc_(label) + '</td>' +
+      '<td style="padding:3px 0;font-size:14px;color:' + B.goldInk + ';font-weight:600">' + htmlEsc_(value || '-') + '</td></tr>';
+  };
+  var note = (noteTitle || noteBody) ?
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr><td style="padding:14px 16px">' +
+      (noteTitle ? '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:' + B.amber + ';margin:0 0 8px">' + htmlEsc_(noteTitle) + '</div>' : '') +
+      '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">' + htmlEsc_(noteBody || '') + '</div>' +
+    '</td></tr></table>' : '';
+  var inner =
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">Please create a <strong>' + htmlEsc_(accountLabel) +
+      '</strong> account for the following new ' + htmlEsc_(company.name) + ' starter.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">' +
+      detail('Name', name) + detail('Team', team) +
+    '</table>' + note +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Thanks,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, kicker, inner);
+}
+
+/** CMA manual account-request email (name + team + a cost callout). */
+function cmaRequestHtml_(company, name, team) {
+  return accountRequestHtml_(company, 'CMA account request', 'CMA (cmainfo.co.za)', name, team,
+    'Approval needed - incurs cost',
+    'A CMA seat carries a cost. Reply to confirm whether this starter should be given a CMA account; once approved, the seat can be set up on cmainfo.co.za.');
+}
+
+/** Dialfire manual account-request email (name + team). */
+function dialfireRequestHtml_(company, name, team) {
+  return accountRequestHtml_(company, 'Dialfire account request', 'Dialfire', name, team, '', '');
+}
+
 /** Tuesday induction digest (auto-send permitted for this scoped pipeline). */
 function inductionDigestHtml_(company, buckets) {
   var B = CFG.BRAND;

@@ -19,8 +19,8 @@
   "provisioning_systems": ["google", "propdata", "property24", "cma", "dialfire"],
   "systems_master": ["google", "propdata", "property24", "cma", "dialfire", "hubspot"],
   "offboarding_systems_default": ["google", "propdata", "property24", "cma", "dialfire", "hubspot"],
-  "inline_systems": ["google", "propdata"],
-  "worker_systems": ["property24", "cma", "dialfire"],
+  "inline_systems": ["google"],
+  "worker_systems": ["propdata", "property24", "cma", "dialfire"],
   "entities": ["quay1", "aqua"],
 
   "max_attempts_default": 3,

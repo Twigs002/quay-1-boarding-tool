@@ -1,2 +1,8 @@
 playwright>=1.40
 gspread>=6.0
+# Prop24 photo pipeline (worker/photo_pipeline.py). rembg pulls onnxruntime + downloads
+# a ~176MB segmentation model on first run; only imported when a full-status photo is built.
+Pillow>=10.0
+rembg[cpu]>=2.0
+# Drive download of the FICA headshot for the Prop24 photo pipeline (worker/drive.py).
+google-api-python-client>=2.0

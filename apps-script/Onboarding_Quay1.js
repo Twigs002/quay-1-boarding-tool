@@ -53,8 +53,12 @@ function onboardQuay1_(body, ctx) {
     senior_email: c.senior_email, requester_name: requesterName,
     requester_email: requesterEmail, designation: brokerActivityLabel_(c.activity) || c.activity, team: c.team,
     commission: c.commission, programs: c.programs, systems_json: JSON.stringify(systems),
-    status: 'Contract sent',
+    nationality: c.nationality, status: 'Contract sent',
   });
+
+  // Mirror the new starter into the HR sheet's "New Starters (Tracking)" tab (non-fatal, DRY_RUN-safe).
+  try { hrTrackingUpsert_(folder.getId()); }
+  catch (err) { logAudit_('hr_tracking_failed', { folderId: folder.getId(), error: String(err) }); }
 
   // CC the senior broker + requester on the welcome email, matching the live recruitment pipeline.
   var emailed = _emailContract_('quay1', c.candidate_email, c.full_name, folder.getId(), gen.pdfFile,
@@ -90,6 +94,9 @@ function _quay1Fields_(f) {
     commission: f.commission || '',
     deal_type: f.deal_type || '',
     programs: f.programs || [],
+    // Only meaningful (and asked for on the form) when the ID is not a 13-digit SA ID; Hr.js
+    // defaults SA IDs to "South African" so an empty value here is fine for locals.
+    nationality: String(f.nationality || '').trim(),
   };
 }
 

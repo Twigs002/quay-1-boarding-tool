@@ -92,11 +92,19 @@ function ficaUpload_(body) {
     prepared.push({ label: label, ext: ext, mime: mime, bytes: bytes });
   }
 
+  // Right-to-work gate: a candidate whose ID is not a 13-digit SA ID must attach a work permit.
+  var hasPermit = prepared.some(function (p) { return p.label === 'PERMIT'; });
+  if (!isSaId_(meta.id_number) && !hasPermit) {
+    return { ok: false, error: 'a work permit document is required (your ID is not a 13-digit South African ID).' };
+  }
+
   var ticked = [];
+  var photoFileId = '';
   prepared.forEach(function (p) {
     try {
       var blob = Utilities.newBlob(p.bytes, p.mime, p.label + ' - ' + name + '.' + p.ext);
-      ficaFolder.createFile(blob);
+      var file = ficaFolder.createFile(blob);
+      if (p.label === 'PHOTO') photoFileId = file.getId();   // the branded Prop24 photo source
       var key = FICA_LABEL_KEY[p.label];
       if (key) { tickFica_(folderId, key); ticked.push(key); }
     } catch (err) {
@@ -110,11 +118,35 @@ function ficaUpload_(body) {
   ficaFolder.createFile('FICA details - ' + name + '.txt',
     'FICA submission for ' + name + '\nReceived: ' + nowIso_() + '\n\n' + lines.join('\n'), 'text/plain');
 
-  // Persist FFC status + number and the derived PropData profile type onto the Onboarding row.
-  upsertOnboardingRow_({ folderId: folderId, ffc_status: ffcStatus, ffc_number: ffcNumber,
-    propdata_profile_type: profileType });
+  // HR Information Sheet fields the candidate supplies here. Read the top-level machine key, falling
+  // back to the human-readable detail label. Birthday auto-derives from a 13-digit SA ID when blank.
+  var pick = function (key, label) { return String((body && body[key]) || d[label] || '').trim(); };
+  var birthday = pick('birthday', 'Birthday') || saIdBirthday_(meta.id_number);
+
+  // Persist FFC status/number, the derived PropData profile type, and the HR fields onto the row.
+  upsertOnboardingRow_({
+    folderId: folderId, ffc_status: ffcStatus, ffc_number: ffcNumber, propdata_profile_type: profileType,
+    birthday: birthday,
+    bank_name: pick('bank_name', 'Bank'),
+    account_number: pick('account_number', 'Account number'),
+    account_type: pick('account_type', 'Account type'),
+    tax_number: pick('tax_number', 'Income tax number'),
+    residential_address: pick('home_address', 'Residential address'),
+    work_permit_expiry: pick('work_permit_expiry', 'Work permit expiry'),
+    work_permit_received: hasPermit ? ('Received ' + nowIso_()) : '',
+    nok_name: pick('nok_name', 'Next of kin name'),
+    nok_contact: pick('nok_contact', 'Next of kin contact'),
+    nok_relationship: pick('nok_relationship', 'Next of kin relationship'),
+    nok_email: pick('nok_email', 'Next of kin email'),
+    photo_file_id: photoFileId,
+  });
 
   setOnboardingStatus_(folderId, 'FICA received');
+
+  // Mirror to HR: refresh the tracking row, then promote (append-only, once) into the entity
+  // destination tab now that FICA is complete. Non-fatal + DRY_RUN-safe.
+  try { hrTrackingUpsert_(folderId); hrPromote_(folderId); }
+  catch (err) { logAudit_('hr_sync_failed', { folderId: folderId, error: String(err) }); }
 
   if (isEmail_(meta.email)) {
     var company = CFG.COMPANY[meta.entity] || CFG.COMPANY.quay1;
@@ -179,9 +211,9 @@ function ficaForm_(folderId) {
 '.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px}' +
 '.sec{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--navy);margin:0 0 12px}' +
 'label{display:block;font-size:13px;font-weight:600;color:var(--slate);margin:0 0 5px}.req{color:var(--red)}' +
-'input[type=text],textarea{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--card2);' +
+'input[type=text],input[type=date],textarea,select{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--card2);' +
 'border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;outline:none}' +
-'input:focus,textarea:focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(61,91,166,.22);background:#fff}' +
+'input:focus,textarea:focus,select:focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(61,91,166,.22);background:#fff}' +
 'textarea{resize:vertical;min-height:70px}.row{margin-bottom:14px}.filewrap{margin-top:10px}' +
 'input[type=file]{width:100%;font-size:13px;color:var(--slate);background:#EAF0FB;' +
 'border:1px dashed var(--navy);border-radius:var(--r-sm);padding:12px;cursor:pointer}' +
@@ -218,22 +250,41 @@ badLink +
 '<div class="row"><label for="id_number">ID or passport number <span class="req">*</span></label>' +
 '<input type="text" id="id_number" inputmode="numeric" autocomplete="off" required></div>' +
 '<div class="filewrap"><label for="f_id">Certified copy of your ID or passport <span class="req">*</span></label>' +
-'<input type="file" id="f_id" accept="image/*,application/pdf" required></div></div>' +
-'<div class="card"><p class="sec">3 - Proof of address</p>' +
+'<input type="file" id="f_id" accept="image/*,application/pdf" required></div>' +
+// Work permit block - revealed only when the ID entered is not a 13-digit South African ID.
+'<div id="permitBlock" style="display:none">' +
+'<div class="row" style="margin-top:14px"><label for="work_permit_expiry">Work permit expiry date <span class="req">*</span></label>' +
+'<input type="date" id="work_permit_expiry"></div>' +
+'<div class="filewrap"><label for="f_permit">Work permit / right-to-work document <span class="req">*</span></label>' +
+'<input type="file" id="f_permit" accept="image/*,application/pdf">' +
+'<p class="hint">Required because your ID is not a 13-digit South African ID. This confirms you are legally allowed to work with us.</p></div></div></div>' +
+'<div class="card"><p class="sec">3 - Date of birth</p>' +
+'<div class="row"><label for="birthday">Date of birth</label>' +
+'<input type="date" id="birthday">' +
+'<p class="hint">Optional for South African IDs - we read it from your ID automatically. Please fill it in if you use a passport.</p></div></div>' +
+'<div class="card"><p class="sec">4 - Proof of address</p>' +
 '<div class="row"><label for="home_address">Residential address <span class="req">*</span></label>' +
 '<textarea id="home_address" placeholder="Street, suburb, city, postal code" required></textarea></div>' +
 '<div class="filewrap"><label for="f_addr">Proof of address <span class="req">*</span></label>' +
 '<input type="file" id="f_addr" accept="image/*,application/pdf" required>' +
 '<p class="hint">A utility bill, bank statement or lease dated within the last 3 months.</p></div></div>' +
-'<div class="card"><p class="sec">4 - Bank confirmation</p>' +
+'<div class="card"><p class="sec">5 - Bank details</p>' +
+'<div class="row"><label for="bank_name">Bank <span class="req">*</span></label>' +
+'<input type="text" id="bank_name" autocomplete="off" required></div>' +
+'<div class="row"><label for="account_number">Account number <span class="req">*</span></label>' +
+'<input type="text" id="account_number" inputmode="numeric" autocomplete="off" required></div>' +
+'<div class="row"><label for="account_type">Type of account <span class="req">*</span></label>' +
+'<select id="account_type" required><option value="">Select...</option>' +
+'<option value="Cheque">Cheque</option><option value="Savings">Savings</option>' +
+'<option value="Transmission">Transmission</option><option value="Other">Other</option></select></div>' +
 '<div class="filewrap"><label for="f_bank">Bank confirmation letter or statement <span class="req">*</span></label>' +
 '<input type="file" id="f_bank" accept="image/*,application/pdf" required></div></div>' +
-'<div class="card"><p class="sec">5 - Tax</p>' +
+'<div class="card"><p class="sec">6 - Tax</p>' +
 '<div class="row"><label for="tax_number">Income tax number <span class="req">*</span></label>' +
 '<input type="text" id="tax_number" inputmode="numeric" autocomplete="off" required></div>' +
 '<div class="filewrap"><label for="f_tax">SARS / tax number proof (optional)</label>' +
 '<input type="file" id="f_tax" accept="image/*,application/pdf"></div></div>' +
-'<div class="card"><p class="sec">6 - Professional status</p>' +
+'<div class="card"><p class="sec">7 - Professional status</p>' +
 '<div class="row"><label>Your FFC (Fidelity Fund Certificate) status <span class="req">*</span></label>' +
 '<div class="radios">' +
 '<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status &ndash; I hold a valid FFC</span></label>' +
@@ -243,9 +294,18 @@ badLink +
 '<div class="row" id="ffcNumRow"><label for="ffc_number">FFC number <span class="req" id="ffcNumReq">*</span></label>' +
 '<input type="text" id="ffc_number" autocomplete="off">' +
 '<p class="hint">Your Fidelity Fund Certificate number from the PPRA.</p></div>' +
-'<div class="filewrap" id="photoRow" style="display:none"><label for="f_photo">Professional profile photo <span class="req">*</span></label>' +
+'<div class="filewrap" id="photoRow"><label for="f_photo">Headshot photo (optional)</label>' +
 '<input type="file" id="f_photo" accept="image/*">' +
-'<p class="hint">A clear head-and-shoulders photo for your PropData agent profile (full-status agents only).</p></div></div>' +
+'<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your Property24 profile up faster. Optional, but recommended.</p></div></div>' +
+'<div class="card"><p class="sec">8 - Next of kin</p>' +
+'<div class="row"><label for="nok_name">Next of kin name <span class="req">*</span></label>' +
+'<input type="text" id="nok_name" autocomplete="off" required></div>' +
+'<div class="row"><label for="nok_contact">Next of kin contact number <span class="req">*</span></label>' +
+'<input type="text" id="nok_contact" inputmode="tel" autocomplete="off" required></div>' +
+'<div class="row"><label for="nok_relationship">Relationship <span class="req">*</span></label>' +
+'<input type="text" id="nok_relationship" autocomplete="off" required></div>' +
+'<div class="row"><label for="nok_email">Next of kin email</label>' +
+'<input type="text" id="nok_email" inputmode="email" autocomplete="off"></div></div>' +
 '<button type="submit" class="btn" id="submitBtn">Submit my FICA documents</button>' +
 '<div id="note" class="note"></div></form>' +
 '<p class="foot">' + companyName + ' - your documents are stored securely and used only for FICA compliance.</p>' +
@@ -258,26 +318,36 @@ badLink +
 'function val(id){var e=document.getElementById(id);return e?e.value.trim():"";}' +
 'function b64(file){return new Promise(function(res,rej){var r=new FileReader();' +
 'r.onload=function(){res(String(r.result).split(",")[1]);};r.onerror=rej;r.readAsDataURL(file);});}' +
-'var MAP=[["f_contract","CONTRACT"],["f_id","ID"],["f_addr","POA"],["f_bank","BANK"],["f_tax","TAX"],["f_photo","PHOTO"]];' +
+'var MAP=[["f_contract","CONTRACT"],["f_id","ID"],["f_addr","POA"],["f_bank","BANK"],["f_tax","TAX"],["f_photo","PHOTO"],["f_permit","PERMIT"]];' +
 'var ffcRadios=document.getElementsByName("ffc_status");' +
-'var photoRow=document.getElementById("photoRow"),fphoto=document.getElementById("f_photo");' +
 'var ffcNumEl=document.getElementById("ffc_number"),ffcNumReq=document.getElementById("ffcNumReq");' +
 'function ffcVal(){for(var k=0;k<ffcRadios.length;k++){if(ffcRadios[k].checked)return ffcRadios[k].value;}return "";}' +
-'function ffcState(){var v=ffcVal(),isFull=(v==="full");photoRow.style.display=isFull?"":"none";' +
-'if(fphoto)fphoto.required=isFull;var needNum=(v==="full"||v==="candidate");' +
+'function ffcState(){var v=ffcVal();var needNum=(v==="full"||v==="candidate");' +
 'ffcNumEl.required=needNum;if(ffcNumReq)ffcNumReq.style.display=needNum?"":"none";}' +
 'for(var k=0;k<ffcRadios.length;k++){ffcRadios[k].addEventListener("change",ffcState);}ffcState();' +
+// Reveal + require the work-permit block only when the ID entered is not a 13-digit SA ID.
+'var idEl=document.getElementById("id_number");' +
+'var permitBlock=document.getElementById("permitBlock");' +
+'var permitFile=document.getElementById("f_permit"),permitExp=document.getElementById("work_permit_expiry");' +
+'function isSaId(v){return /^\\d{13}$/.test(String(v||"").trim());}' +
+'function permitState(){var need=!isSaId(val("id_number"));if(permitBlock)permitBlock.style.display=need?"":"none";' +
+'if(permitFile)permitFile.required=need;if(permitExp)permitExp.required=need;}' +
+'if(idEl){idEl.addEventListener("input",permitState);}permitState();' +
 'form.addEventListener("submit",function(e){e.preventDefault();if(!KNOWN)return;' +
 'if(!form.checkValidity()){form.reportValidity();return;}' +
 'btn.disabled=true;showNote("info","Uploading your documents, please hold on...");' +
-'var details={"ID/passport number":val("id_number"),"Residential address":val("home_address"),"Income tax number":val("tax_number"),"FFC status":ffcVal(),"FFC number":val("ffc_number")};' +
+'var details={"ID/passport number":val("id_number"),"Birthday":val("birthday"),"Residential address":val("home_address"),"Bank":val("bank_name"),"Account number":val("account_number"),"Account type":val("account_type"),"Income tax number":val("tax_number"),"Work permit expiry":val("work_permit_expiry"),"FFC status":ffcVal(),"FFC number":val("ffc_number"),"Next of kin name":val("nok_name"),"Next of kin contact":val("nok_contact"),"Next of kin relationship":val("nok_relationship"),"Next of kin email":val("nok_email")};' +
 'var jobs=MAP.map(function(m){var i=document.getElementById(m[0]);var f=i&&i.files&&i.files[0];' +
 'if(!f)return Promise.resolve(null);return b64(f).then(function(x){' +
 'var ext=(f.name.split(".").pop()||"dat").toLowerCase();' +
 'return{label:m[1],ext:ext,mimeType:f.type||"application/octet-stream",dataBase64:x};});});' +
 'Promise.all(jobs).then(function(files){files=files.filter(Boolean);' +
 'return fetch(ENDPOINT,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},' +
-'body:JSON.stringify({kind:"fica_upload",folderId:FOLDER_ID,details:details,ffc_status:ffcVal(),ffc_number:val("ffc_number"),files:files})});})' +
+'body:JSON.stringify({kind:"fica_upload",folderId:FOLDER_ID,details:details,ffc_status:ffcVal(),ffc_number:val("ffc_number"),' +
+'birthday:val("birthday"),bank_name:val("bank_name"),account_number:val("account_number"),account_type:val("account_type"),' +
+'tax_number:val("tax_number"),home_address:val("home_address"),work_permit_expiry:val("work_permit_expiry"),' +
+'nok_name:val("nok_name"),nok_contact:val("nok_contact"),nok_relationship:val("nok_relationship"),nok_email:val("nok_email"),' +
+'files:files})});})' +
 '.then(function(r){return r.json();}).then(function(d){' +
 'if(d&&d.ok){form.style.display="none";showNote("ok","Thank you! Your FICA documents have been received.");}' +
 'else{showNote("err","Something went wrong: "+((d&&d.error)||"unknown")+".");btn.disabled=false;}})' +

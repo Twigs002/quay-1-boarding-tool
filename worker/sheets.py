@@ -58,9 +58,10 @@ OFFB_COLS = {
     "trigger_id": 11,           # K
 }
 
-# Systems this worker owns (browser-only). google + propdata are done inline by
-# Apps Script, so the worker skips them even if it sees such a row.
-WORKER_SYSTEMS = {"property24", "cma", "dialfire"}
+# Systems this worker owns (browser-driven). google is done inline (API) by Apps
+# Script, so the worker skips google rows even if it sees them. propdata (PDMS) has
+# no usable user API and is now driven by the browser worker like the others.
+WORKER_SYSTEMS = {"propdata", "property24", "cma", "dialfire"}
 
 PENDING = "pending"
 IN_PROGRESS = "in_progress"
@@ -122,7 +123,7 @@ class SheetBus:
     # -------------------------------------------------- reads
     def pending_provisioning(self) -> list[QueueRow]:
         """Return provisioning rows that are pending AND owned by the worker
-        (property24/cma/dialfire). Row 1 is the header, so data starts at row 2.
+        (propdata/property24/cma/dialfire). Row 1 is the header, so data starts at row 2.
         """
         records = self._prov.get_all_values()
         out: list[QueueRow] = []

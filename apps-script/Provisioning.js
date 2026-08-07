@@ -109,6 +109,7 @@ function _personFor_(folderId) {
     // FICA time; ffc_status is kept as a fallback so the role still derives if it was not.
     ffc_status: o.ffc_status || '',
     propdata_profile_type: o.propdata_profile_type || '',
+    photo_file_id: o.photo_file_id || '',   // FICA headshot -> branded Prop24 photo (full-status only)
     quay_email: '',
   };
 }
@@ -142,12 +143,8 @@ function provisionAll_(folderId, systems, ctx) {
     if (g.result && g.result.email) person.quay_email = g.result.email;
   }
 
-  if (systems.indexOf('propdata') >= 0) {
-    var p = _runInline_(person, 'propdata', function () { return propdataCreate_(person); });
-    results.propdata = p.status;
-    if (p.status === 'error') anyError = true;
-  }
-
+  // PropData is now a browser-worker system (see WORKER_SYSTEMS); it is enqueued below
+  // with the other browser systems rather than created inline via the old feeds-api REST.
   var browser = systems.filter(function (s) { return CFG.WORKER_SYSTEMS.indexOf(s) >= 0; });
   enqueueBrowserSystems_(person, browser, 'create');
   browser.forEach(function (s) { results[s] = 'pending'; });
@@ -243,7 +240,15 @@ function approveAndProvision_(folderId, ctx) {
     if (!Array.isArray(systems) || !systems.length) {
       systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
     }
+
     var prov = provisionAll_(folderId, systems, ctx);
+
+    // CMA + Dialfire are not auto-created (CMA costs money; Dialfire has no create API), so an
+    // entitled candidate triggers a manual account-request email - CMA to Sheldon + Marthinus,
+    // Dialfire to Alan. After provisionAll_ so no one is asked to set up an account before the rest
+    // of setup has started. Both idempotent + test-safe inside (see helpers).
+    _maybeRequestCma_(folderId, o, systems);
+    _maybeRequestDialfire_(folderId, o, systems);
 
     // Only mark the candidate PROVISIONED (dropping them off the pipeline) when real accounts were
     // actually created. On an error, leave provisioned_at empty so it stays visible and retryable.
@@ -262,6 +267,73 @@ function approveAndProvision_(folderId, ctx) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Shared "manual account request" email for a system that is NOT auto-created (CMA carries a per-seat
+ * cost; Dialfire has no usable create API). On admin acceptance of an entitled starter we email
+ * whoever creates the account with just the starter's name + team. A deliberate, scoped exception to
+ * the draft-only rule (user asked for these to actually send). Idempotent: stamps spec.col and never
+ * re-sends. Test-safe: in DRY_RUN it DRAFTS without stamping, so the real send still fires once armed.
+ * Never throws (an email failure must not block approval).
+ *   spec = { system, label, subjectTitle, recipients, requestedField, col, html(company,name,team),
+ *            noteTitle?, noteBody? }
+ */
+function _requestManualAccount_(folderId, o, systems, spec) {
+  try {
+    if (o && o[spec.requestedField]) return false;                          // already requested
+    if (!Array.isArray(systems) || systems.indexOf(spec.system) < 0) return false;  // not entitled
+    var recipients = (spec.recipients || []).filter(Boolean);
+    if (!recipients.length) return false;
+
+    var company = (CFG.COMPANY && (CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1)) || { name: 'Quay 1', full: 'Quay 1 International Realty' };
+    var name = o.name || 'New starter';
+    var team = o.team || '';
+
+    var subject = spec.subjectTitle + ' - ' + name;
+    var plain = 'Please create a ' + spec.label + ' account for a new ' + company.name + ' starter.\n\n' +
+      'Name: ' + name + '\nTeam: ' + team + '\n' +
+      (spec.noteBody ? '\n' + spec.noteBody + '\n' : '') +
+      '\nThanks,\nThe ' + company.name + ' Team';
+    var opts = { name: company.name, htmlBody: spec.html(company, name, team) };
+
+    if (DRY_RUN_()) {
+      // Test mode: DRAFT only, and DELIBERATELY do NOT stamp spec.col - stamping would permanently
+      // suppress the real send once armed (mirrors provisioned_at staying unstamped in test mode).
+      GmailApp.createDraft(recipients.join(','), subject, plain, opts);
+      logAudit_(spec.system + '_request_drafted', { folderId: folderId, to: recipients.join(','), name: name });
+      return false;
+    }
+    // Live (user asked for these to auto-send): send once and stamp so it never re-sends.
+    GmailApp.sendEmail(recipients.join(','), subject, plain, opts);
+    setOnboardingCell_(folderId, spec.col, nowIso_());
+    logAudit_(spec.system + '_request_sent', { folderId: folderId, to: recipients.join(','), name: name });
+    return true;
+  } catch (err) {
+    logAudit_(spec.system + '_request_failed', { folderId: folderId, error: String(err) });
+    return false;
+  }
+}
+
+/** CMA access request -> CMA_APPROVERS (Sheldon + Marthinus). Entitled = 'cma' in resolved systems
+ *  (full brokers only; the entitlements matrix bars JB assistants). Subject "CMA Account Request - <name>". */
+function _maybeRequestCma_(folderId, o, systems) {
+  return _requestManualAccount_(folderId, o, systems, {
+    system: 'cma', label: 'CMA (cmainfo.co.za)', subjectTitle: 'CMA Account Request',
+    recipients: CFG.CMA_APPROVERS, requestedField: 'cma_requested_at', col: ONB_COL.cma_requested_at,
+    noteBody: 'CMA carries a cost, so please approve or decline before it is set up.',
+    html: function (c, n, t) { return cmaRequestHtml_(c, n, t); },
+  });
+}
+
+/** Dialfire account request -> DIALFIRE_APPROVERS (Alan). Entitled = 'dialfire' in resolved systems
+ *  (the onboarder ticked the Dialfire program). Subject "Dialfire Account Request - <name>". */
+function _maybeRequestDialfire_(folderId, o, systems) {
+  return _requestManualAccount_(folderId, o, systems, {
+    system: 'dialfire', label: 'Dialfire', subjectTitle: 'Dialfire Account Request',
+    recipients: CFG.DIALFIRE_APPROVERS, requestedField: 'dialfire_requested_at', col: ONB_COL.dialfire_requested_at,
+    html: function (c, n, t) { return dialfireRequestHtml_(c, n, t); },
+  });
 }
 
 /** Shallow copy of a provisioner result with the temp password stripped, so it never lands in the
@@ -493,11 +565,14 @@ function _propdataReady_() {
   return propdataLive_() && !!optProp_(PROP.PROPDATA_API_KEY) && !!optProp_(PROP.PROPDATA_VENDOR_ID);
 }
 
+// DEPRECATED: PropData now provisions via the browser worker (worker/provisioners/propdata.py),
+// not this feeds-api REST path. These helpers are retained only for reference / manual use and are
+// no longer called by provisionAll_. Do not re-wire them into the provisioning flow.
 function propdataCreate_(person) { return _propdata_(person, 'create'); }
 function propdataDeactivate_(person) { return _propdata_(person, 'deactivate'); }
 
-/** POST an agent create/deactivate to feeds-api.propdata.net. Dry-run unless PROPDATA_LIVE and
- *  both creds present. Endpoint path is a TODO pending PropData docs (Blocker B2). */
+/** DEPRECATED (see note above). POST an agent create/deactivate to feeds-api.propdata.net. Dry-run
+ *  unless PROPDATA_LIVE and both creds present. Endpoint path was never confirmed (old Blocker B2). */
 function _propdata_(person, action) {
   var payload = {
     action: action, first_name: person.first_name, last_name: person.last_name,
@@ -528,19 +603,55 @@ function enqueueBrowserSystems_(person, systems, action) {
   var ids = [];
   (systems || []).forEach(function (s) {
     if (CFG.WORKER_SYSTEMS.indexOf(s) < 0) return;
+    // Dialfire is now a manual email request to Alan (no create API), so it is NOT enqueued for the
+    // worker - it would only hit an unimplemented DOM path. See _maybeRequestDialfire_.
+    if (s === 'dialfire') return;
+    var payload = _browserPayload_(s, person);
+    // Grant the worker's service account read access to the FICA headshot it will download to build
+    // the branded Prop24 photo. Non-fatal: a share failure just means the worker uses the logo.
+    if (s === 'propdata' && payload.photo_file_id) _sharePhotoWithWorker_(payload.photo_file_id);
     var id = enqueueProvision_({
       folderId: person.folderId, full_name: person.full_name, first_name: person.first_name,
       id_number: person.id_number, quay_email: person.quay_email, cell: person.cell,
-      system: s, action: action || 'create', payload: _browserPayload_(s, person), status: 'pending',
+      system: s, action: action || 'create', payload: payload, status: 'pending',
     });
     ids.push(id);
   });
   return ids;
 }
 
+/** Share a FICA headshot (by Drive file id) with the provisioning worker's service account so the
+ *  worker can download it. No-op when WORKER_SA_EMAIL is unset. Never throws (best-effort). */
+function _sharePhotoWithWorker_(fileId) {
+  var sa = optProp_(PROP.WORKER_SA_EMAIL);
+  if (!sa || !fileId) return;
+  try { DriveApp.getFileById(fileId).addViewer(sa); }
+  catch (err) { logAudit_('worker_photo_share_failed', { fileId: fileId, sa: sa, error: String(err) }); }
+}
+
 /** payload_json for a browser row (CONTRACTS section 1, payload_json shapes). */
 function _browserPayload_(system, person) {
+  if (system === 'propdata') return {
+    last_name: person.last_name || '',
+    email: person.email || person.quay_email || '',
+    designation: _propdataDesignation_(person),   // '-' (candidate) or the full-status title
+    ffc_status: person.ffc_status || '',
+    role: _propdataRole_(person),                 // agent|specialist (reference / fallback)
+    branch: person.team || '',                    // informational; PDMS branch is fixed to Quay 1
+    // Full-status agents get a branded Prop24 photo built by the worker from this FICA headshot;
+    // candidates have no photo id and fall back to the Quay 1 logo. See worker/photo_pipeline.py.
+    photo_file_id: (_propdataDesignation_(person) !== '-' && person.photo_file_id) || '',
+  };
   if (system === 'property24') return { branch: person.team || '', google_linked: true };
   if (system === 'dialfire') return { campaign: person.team || '' };
   return {}; // cma: OTP-gated, no payload
+}
+
+/** PDMS "Designation" for a person, from the induction FFC status. A full-FFC holder is a
+ *  'Non-Principal Property Practitioner'; anyone else (blank/candidate) keeps the PDMS
+ *  default '-'. Mirrors _designation_for() in worker/provisioners/propdata.py. */
+function _propdataDesignation_(person) {
+  var full = String(person.ffc_status || '').toLowerCase() === 'full' ||
+             String(person.propdata_profile_type || '').toLowerCase() === 'agent';
+  return full ? 'Non-Principal Property Practitioner' : '-';
 }

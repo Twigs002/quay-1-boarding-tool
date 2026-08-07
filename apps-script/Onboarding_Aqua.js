@@ -45,8 +45,13 @@ function onboardAqua_(body, ctx) {
     requester_name: requesterName, requester_email: requesterEmail,
     designation: f.designation || '', agreement_type: _aquaTypeLabel_(f),
     work_hours: _workHours_(f.work_hours), remuneration: fmtRemuneration_(f.remuneration),
-    programs: f.programs || [], systems_json: JSON.stringify(systems), status: 'Contract sent',
+    programs: f.programs || [], systems_json: JSON.stringify(systems),
+    nationality: String(f.nationality || '').trim(), status: 'Contract sent',
   });
+
+  // Mirror the new starter into the HR sheet's "New Starters (Tracking)" tab (non-fatal, DRY_RUN-safe).
+  try { hrTrackingUpsert_(folder.getId()); }
+  catch (err) { logAudit_('hr_tracking_failed', { folderId: folder.getId(), error: String(err) }); }
 
   var emailed = _emailContract_('aqua', f.email, name, folder.getId(), gen.pdfFile);
 

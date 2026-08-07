@@ -88,7 +88,21 @@ PORTAL_ACCOUNTS = {
         "user": os.environ.get("DIALFIRE_ADMIN_USER", "").strip(),
         "keychain_service": os.environ.get("DIALFIRE_KEYCHAIN_SERVICE", "dialfire-admin"),
     },
+    "propdata": {
+        "user": os.environ.get("PROPDATA_ADMIN_USER", "").strip(),
+        "keychain_service": os.environ.get("PROPDATA_KEYCHAIN_SERVICE", "propdata-admin"),
+    },
 }
+
+# ---- PropData (PDMS) specifics -------------------------------------------
+# The company id is the /secure/<id>/ segment of the PDMS admin URL (Quay 1 = 46).
+PROPDATA_COMPANY_ID: str = os.environ.get("PROPDATA_COMPANY_ID", "46").strip()
+PROPDATA_BRANCH: str = os.environ.get("PROPDATA_BRANCH", "Quay 1 International Realty")
+PROPDATA_PORTAL: str = os.environ.get("PROPDATA_PORTAL", "Property24")
+# Default profile picture for candidate ("-") agents: the Quay 1 logo shipped in the repo.
+# Full-status agents pass a per-person photo_path (Canva headshot) in the queue payload.
+PROPDATA_DEFAULT_PHOTO: str = os.environ.get(
+    "PROPDATA_DEFAULT_PHOTO", str(ROOT / "assets" / "quay1_profile.png"))
 
 
 def get_password(keychain_service: str, account: str) -> str:
@@ -100,7 +114,7 @@ def get_password(keychain_service: str, account: str) -> str:
     if not account:
         raise RuntimeError(f"no account/username set for keychain service {keychain_service!r}")
     try:
-        return subprocess.check_output(
+        pw = subprocess.check_output(
             ["security", "find-generic-password",
              "-s", keychain_service, "-a", account, "-w"],
             text=True, stderr=subprocess.DEVNULL).strip()
@@ -108,3 +122,9 @@ def get_password(keychain_service: str, account: str) -> str:
         raise RuntimeError(
             f"password not found in Keychain (service={keychain_service!r}, "
             f"account={account!r}): {e}")
+    if not pw:
+        raise RuntimeError(
+            f"Keychain item (service={keychain_service!r}, account={account!r}) is EMPTY. "
+            f"Re-store it in a real Terminal: "
+            f"security add-generic-password -U -s {keychain_service} -a {account} -w")
+    return pw

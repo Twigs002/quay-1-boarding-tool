@@ -80,7 +80,7 @@ def test_column_cross_check():
     check(sorted(sheets.PROV_COLS.values()) == list(range(1, len(contracts.PROVISIONING_QUEUE_COLUMNS) + 1)),
           "Provisioning column indices are 1..N contiguous, no dupes")
     check(set(sheets.WORKER_SYSTEMS) == set(contracts.WORKER_SYSTEMS),
-          "worker WORKER_SYSTEMS == contract WORKER_SYSTEMS (property24/cma/dialfire)")
+          "worker WORKER_SYSTEMS == contract WORKER_SYSTEMS (propdata/property24/cma/dialfire)")
 
 
 # ----------------------------------------------------------- fake bus + rows

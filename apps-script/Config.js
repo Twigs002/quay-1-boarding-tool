@@ -49,6 +49,13 @@ var PROP = {
   GROUPS_JSON: 'GROUPS_JSON',
   // where to transfer/revoke Drive on offboard (a Workspace admin address), optional.
   DRIVE_TRANSFER_TO: 'DRIVE_TRANSFER_TO',
+  // The company "Quay 1 - HR Information Sheet" (owned by lieze@). Onboarding rows are mirrored to
+  // its automated tabs (see Hr.js). Optional: Hr.js falls back to the known id when this is unset.
+  HR_SHEET_ID: 'HR_SHEET_ID',
+  // The provisioning worker's Google service-account email (client_email from its key file). When set,
+  // a full-status agent's FICA headshot is shared with it at enqueue so the worker can download the
+  // photo and build the branded Prop24 picture. Unset -> no share (worker falls back to the logo).
+  WORKER_SA_EMAIL: 'WORKER_SA_EMAIL',
 };
 
 /** Feature-flag Script-Property keys (read via flag_ / the named helpers below). */
@@ -57,6 +64,9 @@ var FLAG = {
   OFFBOARD_ARMED: 'OFFBOARD_ARMED',
   HUBSPOT_SEAT_ENABLED: 'HUBSPOT_SEAT_ENABLED',
   PROPDATA_LIVE: 'PROPDATA_LIVE',
+  // HR Information Sheet mirror (Hr.js). Independent of DRY_RUN so HR writes can be validated /
+  // armed on their own without also arming Google/PropData account creation. Default OFF (safe).
+  HR_SYNC_ENABLED: 'HR_SYNC_ENABLED',
 };
 
 /** Non-secret constants shared across modules. */
@@ -109,8 +119,13 @@ var CFG = {
 
   // Enum vocabulary (mirror docs/CONTRACTS.md section 5). Import these exact strings.
   SYSTEMS: ['google', 'propdata', 'property24', 'cma', 'dialfire', 'hubspot'],
-  WORKER_SYSTEMS: ['property24', 'cma', 'dialfire'],
-  INLINE_SYSTEMS: ['google', 'propdata'],
+  // PropData moved from inline REST to the browser worker (PDMS has no usable user API);
+  // see worker/provisioners/propdata.py. Google is the only remaining inline (API) system.
+  // CMA stays a worker system for the OFFBOARD (deactivate) path, but CMA CREATE is never actually
+  // performed automatically (it costs money + is OTP-gated): the create row just skips, and an
+  // approval-request email is sent to CMA_APPROVERS on admin acceptance instead (see _maybeRequestCma_).
+  WORKER_SYSTEMS: ['propdata', 'property24', 'cma', 'dialfire'],
+  INLINE_SYSTEMS: ['google'],
   ACTIONS: ['create', 'deactivate'],
   QUEUE_STATUS: ['pending', 'in_progress', 'done', 'error', 'skipped'],
   OFFB_STATUS: ['scheduled', 'firing', 'done', 'error'],
@@ -165,6 +180,14 @@ var CFG = {
   ALWAYS_CC: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'alan@quay1.co.za', 'lieze@quay1.co.za'],
   INTERNAL_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'alan@quay1.co.za', 'lieze@quay1.co.za'],
   SYSTEM_PROVISION_TO: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
+  // CMA access costs money, so it is not auto-created. When an admin ACCEPTS a CMA-entitled candidate
+  // on the Admin Check tab, an approval-request email auto-sends to these approvers (see _maybeRequestCma_).
+  // This is a deliberate, scoped exception to the draft-only email rule (the user asked for it to send).
+  CMA_APPROVERS: ['sheldon@quay1.co.za', 'marthinus@quay1.co.za'],
+  // Dialfire has no usable create API (worker DOM unmapped), so like CMA it is a MANUAL account
+  // request: on admin acceptance of a Dialfire-entitled starter, a request email (name + team) is
+  // sent to these recipients to create the account. Scoped auto-send, same model as CMA_APPROVERS.
+  DIALFIRE_APPROVERS: ['alan@quay1.co.za'],
 
   MAX_ATTEMPTS: 3,
   OFFBOARD_DELAY_MIN: 30,
@@ -210,6 +233,8 @@ function DRY_RUN_() {
 function offboardArmed_() { return flag_(FLAG.OFFBOARD_ARMED, false); }
 function hubspotSeatEnabled_() { return flag_(FLAG.HUBSPOT_SEAT_ENABLED, false); }
 function propdataLive_() { return flag_(FLAG.PROPDATA_LIVE, false); }
+/** HR-sheet mirror armed? Default OFF (safe) - Hr.js dry-logs until this is set. */
+function hrSyncEnabled_() { return flag_(FLAG.HR_SYNC_ENABLED, false); }
 
 // ---------------------------------------------------------------- sheet access
 
