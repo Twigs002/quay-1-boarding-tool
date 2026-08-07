@@ -169,12 +169,24 @@ function upsertOnboardingRow_(data) {
   }
 }
 
+/** Read a single row's ONB_WIDTH columns, tolerating a grid that has NOT yet been widened to
+ *  ONB_WIDTH (new columns added but setupHub not re-run): a full-width read throws in that case, so
+ *  fall back to the sheet's actual last column. Missing trailing columns then read as '' and writes
+ *  to them auto-expand the grid, so the tab self-heals without setupHub. */
+function _readOnbRow_(sh, row) {
+  try {
+    return sh.getRange(row, 1, 1, ONB_WIDTH).getValues()[0];
+  } catch (e) {
+    return sh.getRange(row, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0];
+  }
+}
+
 /** The Onboarding row for a folderId as a plain field object, or null. */
 function readOnboardingByFolder_(folderId) {
   var sh = _onbTab_();
   var row = findOnboardingRow_(folderId);
   if (!row) return null;
-  var vals = sh.getRange(row, 1, 1, ONB_WIDTH).getValues()[0];
+  var vals = _readOnbRow_(sh, row);
   var out = {};
   Object.keys(ONB_COL).forEach(function (k) { out[k] = String(vals[ONB_COL[k] - 1] || ''); });
   return out;
@@ -212,7 +224,13 @@ function listOnboarding_(filterFn) {
   var sh = _onbTab_();
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var vals = sh.getRange(2, 1, last - 1, ONB_WIDTH).getValues();
+  // Tolerate a grid not yet widened to ONB_WIDTH (see _readOnbRow_): full-width read, else last column.
+  var vals;
+  try {
+    vals = sh.getRange(2, 1, last - 1, ONB_WIDTH).getValues();
+  } catch (e) {
+    vals = sh.getRange(2, 1, last - 1, Math.max(1, sh.getLastColumn())).getValues();
+  }
   var out = [];
   vals.forEach(function (r) {
     if (!r[ONB_COL.folderId - 1] && !r[ONB_COL.name - 1]) return;
